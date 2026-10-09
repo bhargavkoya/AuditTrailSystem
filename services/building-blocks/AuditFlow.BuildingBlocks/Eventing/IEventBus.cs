@@ -1,3 +1,5 @@
+using AuditFlow.BuildingBlocks.Data;
+
 namespace AuditFlow.BuildingBlocks.Eventing;
 
 /// <summary>
@@ -9,8 +11,11 @@ public interface IEventBus
     Task PublishAsync<TPayload>(EventEnvelope<TPayload> envelope, CancellationToken cancellationToken = default);
 }
 
-/// <summary>Consumer contract. Implementations must be idempotent (at-least-once delivery).</summary>
+/// <summary>
+/// Consumer contract. Runs inside the unit of work that also records the message as processed, so the handler's
+/// writes and the idempotency marker commit (or roll back) together.
+/// </summary>
 public interface IEventHandler<TPayload>
 {
-    Task HandleAsync(EventEnvelope<TPayload> envelope, CancellationToken cancellationToken);
+    Task HandleAsync(EventEnvelope<TPayload> envelope, IUnitOfWork uow, CancellationToken cancellationToken);
 }
