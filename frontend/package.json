@@ -1,0 +1,5 @@
+{
+  "name": "auditflow-frontend",
+  "private": true,
+  "workspaces": ["apps/web"]
+}

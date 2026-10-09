@@ -1,0 +1,62 @@
+{
+  "UserConfig": {
+    "Namespaces": [
+      {
+        "Name": "sbemulatorns",
+        "Queues": [],
+        "Topics": [
+          {
+            "Name": "auditflow-events",
+            "Properties": {
+              "DefaultMessageTimeToLive": "PT1H",
+              "DuplicateDetectionHistoryTimeWindow": "PT20S",
+              "RequiresDuplicateDetection": false
+            },
+            "Subscriptions": [
+              {
+                "Name": "notification",
+                "Properties": { "DeadLetteringOnMessageExpiration": false, "DefaultMessageTimeToLive": "PT1H", "LockDuration": "PT1M", "MaxDeliveryCount": 5, "RequiresSession": false }
+              },
+              {
+                "Name": "engagement",
+                "Properties": { "DeadLetteringOnMessageExpiration": false, "DefaultMessageTimeToLive": "PT1H", "LockDuration": "PT1M", "MaxDeliveryCount": 5, "RequiresSession": false },
+                "Rules": [
+                  { "Name": "SectionUpdated", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "SectionUpdated" } } },
+                  { "Name": "ConfigurationChanged", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "ConfigurationChanged" } } },
+                  { "Name": "ReviewApproved", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "ReviewApproved" } } },
+                  { "Name": "ReviewRejected", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "ReviewRejected" } } }
+                ]
+              },
+              {
+                "Name": "workflow",
+                "Properties": { "DeadLetteringOnMessageExpiration": false, "DefaultMessageTimeToLive": "PT1H", "LockDuration": "PT1M", "MaxDeliveryCount": 5, "RequiresSession": false },
+                "Rules": [
+                  { "Name": "EngagementCreated", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "EngagementCreated" } } },
+                  { "Name": "EngagementUpdated", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "EngagementUpdated" } } },
+                  { "Name": "AttachmentAdded", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "AttachmentAdded" } } },
+                  { "Name": "EngagementStatusChanged", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "EngagementStatusChanged" } } }
+                ]
+              },
+              {
+                "Name": "attachment",
+                "Properties": { "DeadLetteringOnMessageExpiration": false, "DefaultMessageTimeToLive": "PT1H", "LockDuration": "PT1M", "MaxDeliveryCount": 5, "RequiresSession": false },
+                "Rules": [
+                  { "Name": "EngagementStatusChanged", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "EngagementStatusChanged" } } }
+                ]
+              },
+              {
+                "Name": "review",
+                "Properties": { "DeadLetteringOnMessageExpiration": false, "DefaultMessageTimeToLive": "PT1H", "LockDuration": "PT1M", "MaxDeliveryCount": 5, "RequiresSession": false },
+                "Rules": [
+                  { "Name": "EngagementSubmitted", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "EngagementSubmitted" } } },
+                  { "Name": "EngagementStatusChanged", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "EngagementStatusChanged" } } }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "Logging": { "Type": "File" }
+  }
+}

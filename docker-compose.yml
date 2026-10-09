@@ -1,0 +1,110 @@
+# AuditFlow local stack.
+#   docker compose up -d                       -> infrastructure only (SQL Server + Service Bus emulator)
+#   docker compose --profile apps up -d --build -> infrastructure + gateway + 6 services   (see infra/local/up.ps1)
+name: auditflow
+
+x-sa-password: &sa-password ${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026}
+
+x-service-env: &service-env
+  Urls: http://+:8080   # overrides the localhost port in appsettings.json
+  ConnectionStrings__SqlServer: "Server=sqlserver,1433;Database=master;User Id=sa;Password=${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026};TrustServerCertificate=True;Connect Timeout=3"
+  ServiceBus__ConnectionString: "Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+  ServiceBus__TopicName: auditflow-events
+  APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: *sa-password
+      MSSQL_MEMORY_LIMIT_MB: "1536"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqldata:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q \"SELECT 1\" || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  servicebus:
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      ACCEPT_EULA: "Y"
+      SQL_SERVER: sqlserver
+      MSSQL_SA_PASSWORD: *sa-password
+    ports:
+      - "5672:5672"   # AMQP
+      - "5300:5300"   # management / health
+    volumes:
+      - ./infra/local/servicebus/Config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro
+
+  gateway:
+    profiles: [apps]
+    build: &gateway-build
+      context: .
+      dockerfile: infra/docker/service.Dockerfile
+      args:
+        PROJECT: services/gateway/AuditFlow.Gateway
+        DLL: AuditFlow.Gateway.dll
+    environment:
+      <<: *service-env
+      ReverseProxy__Clusters__auth__Destinations__d1__Address: http://auth-service:8080/
+      ReverseProxy__Clusters__engagement__Destinations__d1__Address: http://engagement-service:8080/
+      ReverseProxy__Clusters__workflow__Destinations__d1__Address: http://workflow-service:8080/
+      ReverseProxy__Clusters__attachment__Destinations__d1__Address: http://attachment-service:8080/
+      ReverseProxy__Clusters__review__Destinations__d1__Address: http://review-service:8080/
+      ReverseProxy__Clusters__notification__Destinations__d1__Address: http://notification-service:8080/
+    ports: ["5000:8080"]
+    depends_on: [auth-service, engagement-service, workflow-service, attachment-service, review-service, notification-service]
+
+  auth-service:
+    profiles: [apps]
+    build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/auth-service/AuditFlow.Auth.Api, DLL: AuditFlow.Auth.Api.dll } }
+    environment: *service-env
+    ports: ["5001:8080"]
+    depends_on: { sqlserver: { condition: service_healthy }, servicebus: { condition: service_started } }
+
+  engagement-service:
+    profiles: [apps]
+    build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/engagement-service/AuditFlow.Engagement.Api, DLL: AuditFlow.Engagement.Api.dll } }
+    environment: *service-env
+    ports: ["5002:8080"]
+    depends_on: { sqlserver: { condition: service_healthy }, servicebus: { condition: service_started } }
+
+  workflow-service:
+    profiles: [apps]
+    build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/workflow-service/AuditFlow.Workflow.Api, DLL: AuditFlow.Workflow.Api.dll } }
+    environment: *service-env
+    ports: ["5003:8080"]
+    depends_on: { sqlserver: { condition: service_healthy }, servicebus: { condition: service_started } }
+
+  attachment-service:
+    profiles: [apps]
+    build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/attachment-service/AuditFlow.Attachment.Api, DLL: AuditFlow.Attachment.Api.dll } }
+    environment: *service-env
+    ports: ["5004:8080"]
+    depends_on: { sqlserver: { condition: service_healthy }, servicebus: { condition: service_started } }
+
+  review-service:
+    profiles: [apps]
+    build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/review-service/AuditFlow.Review.Api, DLL: AuditFlow.Review.Api.dll } }
+    environment: *service-env
+    ports: ["5005:8080"]
+    depends_on: { sqlserver: { condition: service_healthy }, servicebus: { condition: service_started } }
+
+  notification-service:
+    profiles: [apps]
+    build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/notification-service/AuditFlow.Notification.Api, DLL: AuditFlow.Notification.Api.dll } }
+    environment: *service-env
+    ports: ["5006:8080"]
+    depends_on: { sqlserver: { condition: service_healthy }, servicebus: { condition: service_started } }
+
+volumes:
+  sqldata:
