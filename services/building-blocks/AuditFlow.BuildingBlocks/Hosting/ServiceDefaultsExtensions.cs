@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 
@@ -77,6 +78,7 @@ public static class ServiceDefaultsExtensions
     /// </summary>
     public static WebApplicationBuilder AddAuditFlowMessaging(this WebApplicationBuilder builder, bool publishes, bool consumes)
     {
+        builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<IOutbox, SqlOutbox>();
         builder.Services.AddSingleton<IProcessedMessageStore, SqlProcessedMessageStore>();
         builder.Services.AddSingleton<EventHandlerRegistry>();

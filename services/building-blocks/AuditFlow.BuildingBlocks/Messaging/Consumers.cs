@@ -131,6 +131,11 @@ public sealed class ServiceBusSubscriberHost(
             return;
         }
 
+        // The emulator / namespace may still be loading its topology. A processor started before the subscription
+        // exists does not recover reliably, so wait until the subscription is reachable first.
+        await WaitForSubscriptionAsync(o, stoppingToken);
+        if (stoppingToken.IsCancellationRequested) return;
+
         await using var processor = client.CreateProcessor(o.TopicName, o.SubscriptionName, new ServiceBusProcessorOptions
         {
             AutoCompleteMessages = false,
@@ -161,6 +166,24 @@ public sealed class ServiceBusSubscriberHost(
 
         try { await Task.Delay(Timeout.Infinite, stoppingToken); } catch (OperationCanceledException) { }
         await processor.StopProcessingAsync(CancellationToken.None);
+    }
+
+    private async Task WaitForSubscriptionAsync(ServiceBusOptions o, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await using var receiver = client.CreateReceiver(o.TopicName, o.SubscriptionName);
+                await receiver.PeekMessageAsync(cancellationToken: ct);
+                return;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogInformation("Waiting for subscription {Topic}/{Subscription} ({Reason})", o.TopicName, o.SubscriptionName, ex.GetType().Name);
+                try { await Task.Delay(TimeSpan.FromSeconds(3), ct); } catch (OperationCanceledException) { return; }
+            }
+        }
     }
 
     private async Task HandleAsync(ProcessMessageEventArgs args, string consumerName)

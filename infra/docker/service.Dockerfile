@@ -4,6 +4,7 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG PROJECT
 WORKDIR /src
 COPY global.json Directory.Build.props ./
+COPY contracts/ contracts/
 COPY services/ services/
 RUN dotnet publish ${PROJECT} -c Release -o /app /p:UseAppHost=false
 

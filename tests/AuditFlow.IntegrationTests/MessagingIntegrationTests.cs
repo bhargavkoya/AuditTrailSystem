@@ -14,8 +14,15 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
 {
     public sealed record Ping(string Text);
 
-    private static OutboxDispatcher NewDispatcher(TestDatabase db, IEventBus bus)
-        => new(db.UnitOfWork, bus, new ConfigurationBuilder().Build(), NullLogger<OutboxDispatcher>.Instance);
+    private sealed class ManualClock(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset now = start;
+        public override DateTimeOffset GetUtcNow() => now;
+        public void Advance(TimeSpan by) => now += by;
+    }
+
+    private static OutboxDispatcher NewDispatcher(TestDatabase db, IEventBus bus, TimeProvider? clock = null)
+        => new(db.UnitOfWork, bus, new ConfigurationBuilder().Build(), clock ?? TimeProvider.System, NullLogger<OutboxDispatcher>.Instance);
 
     private static async Task EnqueueAsync(TestDatabase db, EventEnvelope<Ping> envelope, bool commit)
     {
@@ -70,6 +77,60 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
         Assert.Equal(1, await db.ScalarAsync<int>("SELECT Attempts FROM dbo.OutboxMessage"));
         Assert.Equal("bus down", await db.ScalarAsync<string>("SELECT LastError FROM dbo.OutboxMessage"));
         Assert.Equal(1, await db.ScalarAsync<int>("SELECT COUNT(*) FROM dbo.OutboxMessage WHERE PublishedAt IS NULL"));
+    }
+
+    [Fact]
+    public async Task Failing_event_backs_off_and_newer_events_cannot_overtake_it()
+    {
+        var db = await sql.CreateDatabaseAsync();
+        var clock = new ManualClock(DateTimeOffset.UtcNow);
+        var delivered = new List<string>();
+        var busDown = true;
+        var bus = new Mock<IEventBus>();
+        bus.Setup(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()))
+            .Returns<EventEnvelope<System.Text.Json.JsonElement>, CancellationToken>((e, _) =>
+            {
+                if (busDown) throw new InvalidOperationException("bus down");
+                delivered.Add(e.Payload.GetProperty("text").GetString()!);
+                return Task.CompletedTask;
+            });
+        await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("first")), commit: true);
+        await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("second")), commit: true);
+        var dispatcher = NewDispatcher(db, bus.Object, clock);
+
+        Assert.Equal(0, await dispatcher.DispatchBatchAsync(default));                 // attempt 1 fails
+        Assert.Equal(0, await dispatcher.DispatchBatchAsync(default));                 // still backing off: bus not even called
+        bus.Verify(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.Equal(0, await dispatcher.DispatchBatchAsync(default));                 // attempt 2 fails, backoff doubles
+        Assert.Equal(2, await db.ScalarAsync<int>("SELECT Attempts FROM dbo.OutboxMessage WHERE LastError IS NOT NULL"));
+
+        busDown = false;
+        clock.Advance(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, await dispatcher.DispatchBatchAsync(default));                 // recovers, both published
+        Assert.Equal(["first", "second"], delivered);                                  // in the original order
+    }
+
+    [Fact]
+    public async Task Backoff_is_capped_so_a_long_outage_never_strands_an_event()
+    {
+        var db = await sql.CreateDatabaseAsync();
+        var clock = new ManualClock(DateTimeOffset.UtcNow);
+        var bus = new Mock<IEventBus>();
+        bus.Setup(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("bus down"));
+        await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("x")), commit: true);
+        var dispatcher = NewDispatcher(db, bus.Object, clock);
+
+        for (var i = 0; i < 20; i++)
+        {
+            await dispatcher.DispatchBatchAsync(default);
+            clock.Advance(TimeSpan.FromSeconds(31));                                   // always past the capped backoff
+        }
+
+        Assert.Equal(20, await db.ScalarAsync<int>("SELECT Attempts FROM dbo.OutboxMessage"));
+        Assert.True(20 < OutboxDispatcher.MaxAttempts);                                // still being retried
     }
 
     private sealed class InsertRowHandler(bool fail) : IEventHandler<Ping>
