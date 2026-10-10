@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Diagnostics;
+﻿using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -35,6 +35,7 @@ public sealed class AuditFlowExceptionHandler(ILogger<AuditFlowExceptionHandler>
             NotFoundException n => new ProblemDetails { Status = 404, Title = "Not found", Detail = n.Message },
             ConcurrencyException c => WithVersion(new ProblemDetails { Status = 409, Title = "Conflict", Detail = c.Message }, c.CurrentVersion),
             BadHttpRequestException b => new ProblemDetails { Status = 400, Title = "Bad request", Detail = b.Message },
+            HttpRequestException => new ProblemDetails { Status = 502, Title = "A dependent service is unavailable" },
             _ => null
         };
 
@@ -56,3 +57,4 @@ public sealed class AuditFlowExceptionHandler(ILogger<AuditFlowExceptionHandler>
         return p;
     }
 }
+

@@ -17,7 +17,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
     public Task DisposeAsync() => container.DisposeAsync().AsTask();
 
-    public async Task<TestDatabase> CreateDatabaseAsync()
+    public async Task<TestDatabase> CreateDatabaseAsync(params System.Reflection.Assembly[] serviceMigrations)
     {
         var builder = new SqlConnectionStringBuilder(container.GetConnectionString())
         {
@@ -28,7 +28,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
         var migrations = new MigrationHostedService(
             connectionString,
-            [new MigrationAssembly(typeof(ServiceDefaultsExtensions).Assembly)],
+            [new MigrationAssembly(typeof(ServiceDefaultsExtensions).Assembly), .. serviceMigrations.Select(a => new MigrationAssembly(a))],
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             NullLogger<MigrationHostedService>.Instance);
         await migrations.StartAsync(CancellationToken.None);

@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\services\building-blocks\AuditFlow.BuildingBlocks\AuditFlow.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\..\services\engagement-service\AuditFlow.Engagement.Api\AuditFlow.Engagement.Api.csproj" />
   </ItemGroup>
 
 </Project>
