@@ -30,3 +30,52 @@ public sealed record LoginResponse(string AccessToken, DateTimeOffset ExpiresAt,
 
 /// <summary>Global capabilities only. Per-engagement permissions come from engagement-service.</summary>
 public sealed record PermissionsDto(bool CanCreateEngagement);
+
+public sealed record ConfigurationRequest(IReadOnlyList<string> ConfigTypes, IReadOnlyDictionary<string, bool>? Options);
+
+public sealed record CreateEngagementRequest(
+    string Name,
+    string PeriodType,
+    string Region,
+    Guid ReviewerUserId,
+    IReadOnlyList<Guid>? ParticipantUserIds,
+    ConfigurationRequest Configuration);
+
+public sealed record PersonDto(Guid UserId, string DisplayName);
+
+public sealed record ParticipantDto(Guid UserId, string DisplayName, EngagementRole Role);
+
+/// <summary>Row of the dashboard list.</summary>
+public sealed record EngagementSummaryDto(
+    string EngagementId,
+    string Name,
+    string Region,
+    string PeriodType,
+    PersonDto Reviewer,
+    EngagementStatus Status,
+    DateTimeOffset LastUpdatedAt,
+    EngagementRole MyRole,
+    IReadOnlyList<string> AllowedActions);
+
+public sealed record EngagementListDto(
+    IReadOnlyList<EngagementSummaryDto> Items,
+    IReadOnlyDictionary<string, int> Counts,
+    int Total,
+    int Page,
+    int PageSize);
+
+/// <summary>Engagement header. The client renders myRole/allowedActions/capabilities and decides nothing itself.</summary>
+public sealed record EngagementDetailDto(
+    string EngagementId,
+    string Name,
+    string Region,
+    string PeriodType,
+    EngagementStatus Status,
+    PersonDto Owner,
+    PersonDto Reviewer,
+    EngagementRole MyRole,
+    IReadOnlyList<string> AllowedActions,
+    IReadOnlyList<string> Capabilities,
+    string Version,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset LastUpdatedAt);
