@@ -1,18 +1,21 @@
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace AuditFlow.BuildingBlocks.Eventing;
 
-/// <summary>In-process bus for tests and bus-less runs: dispatches to registered <see cref="IEventHandler{TPayload}"/>s.</summary>
-public sealed class InMemoryEventBus(IServiceProvider services) : IEventBus
+/// <summary>
+/// Bus-less mode (no Service Bus connection string) and tests: records what was published. Nothing is delivered
+/// to consumers; delivery needs the real bus or emulator.
+/// </summary>
+public sealed class InMemoryEventBus(ILogger<InMemoryEventBus> logger) : IEventBus
 {
     private readonly List<object> published = [];
 
     public IReadOnlyList<object> Published => published;
 
-    public async Task PublishAsync<TPayload>(EventEnvelope<TPayload> envelope, CancellationToken cancellationToken = default)
+    public Task PublishAsync<TPayload>(EventEnvelope<TPayload> envelope, CancellationToken cancellationToken = default)
     {
         published.Add(envelope);
-        foreach (var handler in services.GetServices<IEventHandler<TPayload>>())
-            await handler.HandleAsync(envelope, cancellationToken);
+        logger.LogInformation("In-memory bus recorded {EventType} for {EngagementId} (not delivered)", envelope.EventType, envelope.EngagementId);
+        return Task.CompletedTask;
     }
 }

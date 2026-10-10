@@ -1,16 +1,22 @@
 # AuditFlow local stack.
-#   docker compose up -d                       -> infrastructure only (SQL Server + Service Bus emulator)
+#   docker compose up -d                        -> infrastructure only (SQL Server + Service Bus emulator)
 #   docker compose --profile apps up -d --build -> infrastructure + gateway + 6 services   (see infra/local/up.ps1)
 name: auditflow
 
 x-sa-password: &sa-password ${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026}
 
+# Settings every service shares. Each service adds its own ConnectionStrings__Default (database per service).
 x-service-env: &service-env
   Urls: http://+:8080   # overrides the localhost port in appsettings.json
-  ConnectionStrings__SqlServer: "Server=sqlserver,1433;Database=master;User Id=sa;Password=${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026};TrustServerCertificate=True;Connect Timeout=3"
   ServiceBus__ConnectionString: "Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
   ServiceBus__TopicName: auditflow-events
+  Auth__MetadataAddress: http://auth-service:8080/.well-known/openid-configuration
+  Services__Auth__BaseUrl: http://auth-service:8080
   APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
+
+x-service-deps: &service-deps
+  sqlserver: { condition: service_healthy }
+  servicebus: { condition: service_started }
 
 services:
   sqlserver:
@@ -47,14 +53,10 @@ services:
 
   gateway:
     profiles: [apps]
-    build: &gateway-build
-      context: .
-      dockerfile: infra/docker/service.Dockerfile
-      args:
-        PROJECT: services/gateway/AuditFlow.Gateway
-        DLL: AuditFlow.Gateway.dll
+    build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/gateway/AuditFlow.Gateway, DLL: AuditFlow.Gateway.dll } }
     environment:
-      <<: *service-env
+      Urls: http://+:8080
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
       ReverseProxy__Clusters__auth__Destinations__d1__Address: http://auth-service:8080/
       ReverseProxy__Clusters__engagement__Destinations__d1__Address: http://engagement-service:8080/
       ReverseProxy__Clusters__workflow__Destinations__d1__Address: http://workflow-service:8080/
@@ -67,44 +69,58 @@ services:
   auth-service:
     profiles: [apps]
     build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/auth-service/AuditFlow.Auth.Api, DLL: AuditFlow.Auth.Api.dll } }
-    environment: *service-env
+    environment:
+      <<: *service-env
+      ConnectionStrings__Default: "Server=sqlserver,1433;Database=AuditFlow_Auth;User Id=sa;Password=${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026};TrustServerCertificate=True;Connect Timeout=5"
     ports: ["5001:8080"]
-    depends_on: { sqlserver: { condition: service_healthy }, servicebus: { condition: service_started } }
+    depends_on: *service-deps
 
   engagement-service:
     profiles: [apps]
     build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/engagement-service/AuditFlow.Engagement.Api, DLL: AuditFlow.Engagement.Api.dll } }
-    environment: *service-env
+    environment:
+      <<: *service-env
+      ConnectionStrings__Default: "Server=sqlserver,1433;Database=AuditFlow_Engagement;User Id=sa;Password=${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026};TrustServerCertificate=True;Connect Timeout=5"
     ports: ["5002:8080"]
-    depends_on: { sqlserver: { condition: service_healthy }, servicebus: { condition: service_started } }
+    depends_on: *service-deps
 
   workflow-service:
     profiles: [apps]
     build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/workflow-service/AuditFlow.Workflow.Api, DLL: AuditFlow.Workflow.Api.dll } }
-    environment: *service-env
+    environment:
+      <<: *service-env
+      ConnectionStrings__Default: "Server=sqlserver,1433;Database=AuditFlow_Workflow;User Id=sa;Password=${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026};TrustServerCertificate=True;Connect Timeout=5"
     ports: ["5003:8080"]
-    depends_on: { sqlserver: { condition: service_healthy }, servicebus: { condition: service_started } }
+    depends_on: *service-deps
 
   attachment-service:
     profiles: [apps]
     build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/attachment-service/AuditFlow.Attachment.Api, DLL: AuditFlow.Attachment.Api.dll } }
-    environment: *service-env
+    environment:
+      <<: *service-env
+      ConnectionStrings__Default: "Server=sqlserver,1433;Database=AuditFlow_Attachment;User Id=sa;Password=${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026};TrustServerCertificate=True;Connect Timeout=5"
     ports: ["5004:8080"]
-    depends_on: { sqlserver: { condition: service_healthy }, servicebus: { condition: service_started } }
+    depends_on: *service-deps
 
   review-service:
     profiles: [apps]
     build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/review-service/AuditFlow.Review.Api, DLL: AuditFlow.Review.Api.dll } }
-    environment: *service-env
+    environment:
+      <<: *service-env
+      ConnectionStrings__Default: "Server=sqlserver,1433;Database=AuditFlow_Review;User Id=sa;Password=${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026};TrustServerCertificate=True;Connect Timeout=5"
     ports: ["5005:8080"]
-    depends_on: { sqlserver: { condition: service_healthy }, servicebus: { condition: service_started } }
+    depends_on: *service-deps
 
   notification-service:
     profiles: [apps]
     build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/notification-service/AuditFlow.Notification.Api, DLL: AuditFlow.Notification.Api.dll } }
-    environment: *service-env
+    environment:
+      <<: *service-env
+      ConnectionStrings__Default: "Server=sqlserver,1433;Database=AuditFlow_Notification;User Id=sa;Password=${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026};TrustServerCertificate=True;Connect Timeout=5"
+      ServiceBus__SubscriptionName: notification
+      AuditFlow__DevEndpoints__Enabled: "true"   # dev-only events endpoint, removed in Phase 3
     ports: ["5006:8080"]
-    depends_on: { sqlserver: { condition: service_healthy }, servicebus: { condition: service_started } }
+    depends_on: *service-deps
 
 volumes:
   sqldata:

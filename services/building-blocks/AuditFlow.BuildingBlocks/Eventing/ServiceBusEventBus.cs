@@ -10,20 +10,27 @@ public sealed class ServiceBusOptions
 
     public string ConnectionString { get; set; } = string.Empty;
     public string TopicName { get; set; } = "auditflow-events";
+
+    /// <summary>Subscription this service consumes from. Empty = the service does not consume.</summary>
+    public string SubscriptionName { get; set; } = string.Empty;
+}
+
+public static class JsonDefaults
+{
+    public static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 }
 
 /// <summary>
 /// Publishes envelopes to the shared topic. MessageId = EventId (duplicate detection / consumer idempotency);
-/// EventType and EngagementId are application properties so subscriptions can filter on them.
+/// Subject = EventType (subscription correlation filters); EngagementId is an application property.
 /// </summary>
 public sealed class ServiceBusEventBus(ServiceBusClient client, IOptions<ServiceBusOptions> options) : IEventBus, IAsyncDisposable
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly ServiceBusSender sender = client.CreateSender(options.Value.TopicName);
 
     public async Task PublishAsync<TPayload>(EventEnvelope<TPayload> envelope, CancellationToken cancellationToken = default)
     {
-        var message = new ServiceBusMessage(JsonSerializer.SerializeToUtf8Bytes(envelope, Json))
+        var message = new ServiceBusMessage(JsonSerializer.SerializeToUtf8Bytes(envelope, JsonDefaults.Web))
         {
             MessageId = envelope.EventId.ToString(),
             CorrelationId = envelope.CorrelationId,
