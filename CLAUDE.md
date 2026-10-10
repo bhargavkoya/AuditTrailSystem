@@ -1,4 +1,4 @@
-# AuditFlow (P3 POC)
+﻿# AuditFlow (P3 POC)
 
 Base-level interview POC: a backend-controlled audit engagement management platform for financial
 (investment-banking) audit workflows. The full spec is docs/PRD.md. Read it fully before planning or coding.
@@ -86,13 +86,14 @@ field-level audit trail playback, complex external integrations.
 - Small commits, clear messages
 
 ## Commands
-- docker compose up -d      (SQL Server, Service Bus emulator)
-- a single script/compose profile that starts all services (Phase 0 deliverable)
-- dotnet test
-- cd frontend/apps/web && npm run dev
+- ./infra/local/up.ps1       (SQL Server, Service Bus emulator, gateway and all services in Docker)
+- docker compose up -d       (infrastructure only: SQL Server, Service Bus emulator)
+- dotnet test                (add --filter "Category!=Integration" to skip the Docker-based integration tests)
+- cd frontend && npm install; cd apps/web && npm run dev
 
 ## Working agreement
 - Plan before coding on any new phase; wait for my approval
 - After each phase: build, run tests, and tell me exactly how to verify manually
 - If the PRD is ambiguous, ask me; don't silently decide
 - Don't add anything outside the PRD's MVP functional requirements (FR-1 to FR-12) and the non-goals above
+

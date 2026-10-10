@@ -11,7 +11,7 @@ namespace AuditFlow.IntegrationTests;
 /// <summary>One SQL Server container for the whole run; each test gets its own migrated database.</summary>
 public sealed class SqlServerFixture : IAsyncLifetime
 {
-    private readonly MsSqlContainer container = new MsSqlBuilder().WithImage("mcr.microsoft.com/mssql/server:2022-latest").Build();
+    private readonly MsSqlContainer container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
 
     public Task InitializeAsync() => container.StartAsync();
 

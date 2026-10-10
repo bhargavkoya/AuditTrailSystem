@@ -182,3 +182,18 @@ New dependencies: `react-router-dom`, `@tanstack/react-query` (no UI kit; Tailwi
 8. **Token storage:** **`sessionStorage`** (simple, survives refresh) vs in-memory only (safer, logs out on refresh).
 9. **`ISecretProvider` with Key Vault implementation now:** **yes**, small, covers the stack requirement.
 10. **Git flow (confirmed):** `git fetch`, `git checkout main`, `git pull origin main`, then a new branch `feature/phase-1-foundation` from `main`; commit per step, no push until you say. The Phase 0 branch must be merged into `main` first, otherwise the new branch will lack the scaffold.
+
+## 8. Delivered (status after implementation)
+
+All 12 steps are implemented. Differences from the plan above:
+
+- **Outbox backoff and subscriber readiness (added).** A from-scratch run against the real emulator showed that the outbox gave up after
+  ~5 s of bus downtime and that a subscriber started before its subscription existed did not recover. The outbox now backs off
+  (1 s doubling to 30 s, 100 attempts, head-of-line blocking to keep order; migration `0002_outbox_backoff.sql`) and the subscriber
+  waits for its subscription. See ADR 0003.
+- **Subscription filters** are correlation rules on the message Subject (one per event type), not SQL filters.
+- **List query values** (`scope`, `status`) are parsed case-insensitively.
+- **Tests:** unit tests (BuildingBlocks 13, Auth 11, Engagement 154) and Testcontainers integration tests (20). Frontend has no automated tests.
+- **Decisions** 1-10 of section 7 were taken as defaults. ADRs 0001-0004 are in `docs/decisions`.
+- **Known follow-ups:** concurrent handlers can reorder events for one engagement (matters from Phase 3); the Key Vault secret
+  provider is implemented but not exercised against a real vault; `PATCH /engagements/{id}` arrives in Phase 2.
