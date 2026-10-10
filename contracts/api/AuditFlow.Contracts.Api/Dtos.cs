@@ -21,3 +21,12 @@ public sealed record CreationOptionsDto(
 public sealed record UserSummaryDto(Guid UserId, string DisplayName, EngagementRole HomeRole);
 
 public sealed record UserLookupRequest(IReadOnlyList<Guid> UserIds);
+
+public sealed record LoginRequest(string Email, string Password);
+
+public sealed record CurrentUserDto(Guid UserId, string DisplayName, string Email, EngagementRole HomeRole);
+
+public sealed record LoginResponse(string AccessToken, DateTimeOffset ExpiresAt, CurrentUserDto User);
+
+/// <summary>Global capabilities only. Per-engagement permissions come from engagement-service.</summary>
+public sealed record PermissionsDto(bool CanCreateEngagement);
