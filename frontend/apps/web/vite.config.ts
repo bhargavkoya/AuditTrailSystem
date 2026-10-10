@@ -17,6 +17,10 @@ export default defineConfig({
     port: 5173,
     fs: { allow: ['../..'] },
     // Browser talks to one origin; the gateway fans out to services.
-    proxy: { '/health': gateway },
+    proxy: {
+      '/health': gateway,
+      '/auth': gateway,
+      '/engagements': { target: gateway, bypass: (req) => (req.headers.accept?.includes('text/html') ? '/index.html' : undefined) },
+    },
   },
 })
