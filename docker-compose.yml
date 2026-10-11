@@ -12,6 +12,8 @@ x-service-env: &service-env
   ServiceBus__TopicName: auditflow-events
   Auth__MetadataAddress: http://auth-service:8080/.well-known/openid-configuration
   Services__Auth__BaseUrl: http://auth-service:8080
+  Services__Engagement__BaseUrl: http://engagement-service:8080
+  Services__Workflow__BaseUrl: http://workflow-service:8080
   APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
 
 x-service-deps: &service-deps
@@ -81,6 +83,7 @@ services:
     environment:
       <<: *service-env
       ConnectionStrings__Default: "Server=sqlserver,1433;Database=AuditFlow_Engagement;User Id=sa;Password=${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026};TrustServerCertificate=True;Connect Timeout=5"
+      ServiceBus__SubscriptionName: engagement
     ports: ["5002:8080"]
     depends_on: *service-deps
 
@@ -90,6 +93,7 @@ services:
     environment:
       <<: *service-env
       ConnectionStrings__Default: "Server=sqlserver,1433;Database=AuditFlow_Workflow;User Id=sa;Password=${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026};TrustServerCertificate=True;Connect Timeout=5"
+      ServiceBus__SubscriptionName: workflow
     ports: ["5003:8080"]
     depends_on: *service-deps
 
@@ -99,6 +103,10 @@ services:
     environment:
       <<: *service-env
       ConnectionStrings__Default: "Server=sqlserver,1433;Database=AuditFlow_Attachment;User Id=sa;Password=${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026};TrustServerCertificate=True;Connect Timeout=5"
+      ServiceBus__SubscriptionName: attachment
+      Attachments__Root: /data/attachments
+    volumes:
+      - attachments:/data/attachments
     ports: ["5004:8080"]
     depends_on: *service-deps
 
@@ -124,3 +132,4 @@ services:
 
 volumes:
   sqldata:
+  attachments:
