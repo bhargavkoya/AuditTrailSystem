@@ -71,7 +71,8 @@ public sealed class SqlProcessedMessageStore : IProcessedMessageStore
 public interface IEventDispatcher
 {
     /// <summary>Returns true when handlers ran, false when the message was ignored or a duplicate.</summary>
-    Task<bool> DispatchAsync(string consumerName, Guid messageId, string eventType, string json, string? correlationId, CancellationToken cancellationToken);
+    Task<bool> DispatchAsync(string consumerName, Guid messageId, string eventType, string json, string? correlationId, CancellationToken cancellationToken,
+        string? traceParent = null, string? traceState = null);
 }
 
 /// <summary>
@@ -87,14 +88,20 @@ public sealed class EventDispatcher(
 {
     public static readonly ActivitySource Source = new("AuditFlow.Messaging");
 
-    public async Task<bool> DispatchAsync(string consumerName, Guid messageId, string eventType, string json, string? correlationId, CancellationToken cancellationToken)
+    public async Task<bool> DispatchAsync(string consumerName, Guid messageId, string eventType, string json, string? correlationId, CancellationToken cancellationToken,
+        string? traceParent = null, string? traceState = null)
     {
         var registrations = registry.For(eventType);
         if (registrations.Count == 0)
             return false;
 
         using var correlation = CorrelationContext.Begin(correlationId ?? string.Empty);
-        using var activity = Source.StartActivity($"consume {eventType}", ActivityKind.Consumer);
+
+        // Without a (valid) traceparent the consumer simply starts its own trace.
+        ActivityContext.TryParse(traceParent, traceState, isRemote: true, out var parent);
+        using var activity = Source.StartActivity($"consume {eventType}", ActivityKind.Consumer, parent);
+        activity?.SetTag("auditflow.event_type", eventType);
+        activity?.SetTag("auditflow.consumer", consumerName);
         activity?.SetTag("auditflow.correlation_id", correlationId);
         activity?.SetTag("messaging.message_id", messageId);
 
@@ -193,7 +200,9 @@ public sealed class ServiceBusSubscriberHost(
         try
         {
             await dispatcher.DispatchAsync(consumerName, Guid.Parse(message.MessageId), eventType, message.Body.ToString(),
-                message.CorrelationId, args.CancellationToken);
+                message.CorrelationId, args.CancellationToken,
+                message.ApplicationProperties.GetValueOrDefault(TraceContextKeys.TraceParent)?.ToString(),
+                message.ApplicationProperties.GetValueOrDefault(TraceContextKeys.TraceState)?.ToString());
             await args.CompleteMessageAsync(message, args.CancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

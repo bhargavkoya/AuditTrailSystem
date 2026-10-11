@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using AuditFlow.BuildingBlocks.Data;
 using AuditFlow.BuildingBlocks.Eventing;
@@ -17,20 +18,33 @@ public interface IOutbox
 public sealed class SqlOutbox : IOutbox
 {
     private const string InsertSql = """
-        INSERT INTO dbo.OutboxMessage (Id, EventType, EngagementId, Envelope, CorrelationId, OccurredAt)
-        VALUES (@Id, @EventType, @EngagementId, @Envelope, @CorrelationId, @OccurredAt)
+        INSERT INTO dbo.OutboxMessage (Id, EventType, EngagementId, Envelope, CorrelationId, OccurredAt, TraceParent, TraceState)
+        VALUES (@Id, @EventType, @EngagementId, @Envelope, @CorrelationId, @OccurredAt, @TraceParent, @TraceState)
         """;
 
     public Task EnqueueAsync<TPayload>(IUnitOfWork uow, EventEnvelope<TPayload> envelope, CancellationToken cancellationToken)
-        => uow.ExecuteAsync(InsertSql, new
+    {
+        // The ambient span is the request (or consumer) that caused this event; remember it for the dispatcher.
+        var current = Activity.Current;
+        return uow.ExecuteAsync(InsertSql, new
         {
             Id = envelope.EventId,
             envelope.EventType,
             envelope.EngagementId,
             Envelope = JsonSerializer.Serialize(envelope, JsonDefaults.Web),
             envelope.CorrelationId,
-            envelope.OccurredAt
+            envelope.OccurredAt,
+            TraceParent = current?.IdFormat == ActivityIdFormat.W3C ? current.Id : null,
+            TraceState = current?.TraceStateString
         }, cancellationToken);
+    }
+}
+
+/// <summary>Trace-context keys carried on Service Bus application properties.</summary>
+public static class TraceContextKeys
+{
+    public const string TraceParent = "traceparent";
+    public const string TraceState = "tracestate";
 }
 
 /// <summary>
@@ -51,7 +65,7 @@ public sealed class OutboxDispatcher(
     private const int MaxBackoffSeconds = 30;
 
     private const string ClaimSql = """
-        SELECT TOP (@Batch) Id, Envelope, Attempts, NextAttemptAt
+        SELECT TOP (@Batch) Id, Envelope, Attempts, NextAttemptAt, TraceParent, TraceState
         FROM dbo.OutboxMessage WITH (UPDLOCK, READPAST, ROWLOCK)
         WHERE PublishedAt IS NULL AND Attempts < @MaxAttempts
         ORDER BY Seq
@@ -96,6 +110,15 @@ public sealed class OutboxDispatcher(
             try
             {
                 var envelope = JsonSerializer.Deserialize<EventEnvelope<JsonElement>>(row.Envelope, JsonDefaults.Web)!;
+
+                // Child of the originating request; the bus stamps Activity.Current onto the message as traceparent.
+                ActivityContext.TryParse(row.TraceParent, row.TraceState, isRemote: true, out var parent);
+                using var activity = EventDispatcher.Source.StartActivity(
+                    $"publish {envelope.EventType}", ActivityKind.Producer, parent);
+                activity?.SetTag("auditflow.event_type", envelope.EventType);
+                activity?.SetTag("auditflow.engagement_id", envelope.EngagementId);
+                activity?.SetTag("auditflow.correlation_id", envelope.CorrelationId);
+
                 await bus.PublishAsync(envelope, ct);
                 await uow.ExecuteAsync("UPDATE dbo.OutboxMessage SET PublishedAt = @now WHERE Id = @Id", new { row.Id, now = clock.GetUtcNow() }, ct);
                 published++;
@@ -116,5 +139,6 @@ public sealed class OutboxDispatcher(
         return published;
     }
 
-    private sealed record OutboxRow(Guid Id, string Envelope, int Attempts, DateTimeOffset? NextAttemptAt);
+    private sealed record OutboxRow(
+        Guid Id, string Envelope, int Attempts, DateTimeOffset? NextAttemptAt, string? TraceParent, string? TraceState);
 }

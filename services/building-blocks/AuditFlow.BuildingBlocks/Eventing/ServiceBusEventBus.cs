@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Text.Json;
+using AuditFlow.BuildingBlocks.Messaging;
 using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Options;
 
@@ -40,6 +42,15 @@ public sealed class ServiceBusEventBus(ServiceBusClient client, IOptions<Service
         message.ApplicationProperties["EventType"] = envelope.EventType;
         message.ApplicationProperties["EngagementId"] = envelope.EngagementId;
         message.ApplicationProperties["SchemaVersion"] = envelope.SchemaVersion;
+
+        // Dispatcher's "publish" span is current here; consumers parent their span on it.
+        var activity = Activity.Current;
+        if (activity?.IdFormat == ActivityIdFormat.W3C && activity.Id is not null)
+        {
+            message.ApplicationProperties[TraceContextKeys.TraceParent] = activity.Id;
+            if (!string.IsNullOrEmpty(activity.TraceStateString))
+                message.ApplicationProperties[TraceContextKeys.TraceState] = activity.TraceStateString;
+        }
 
         await sender.SendMessageAsync(message, cancellationToken);
     }

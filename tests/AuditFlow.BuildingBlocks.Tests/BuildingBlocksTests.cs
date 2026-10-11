@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AuditFlow.BuildingBlocks.Correlation;
 using AuditFlow.BuildingBlocks.Data;
 using AuditFlow.BuildingBlocks.Errors;
@@ -105,6 +106,54 @@ public class EventDispatcherTests
             f.Dispatcher.DispatchAsync("svc", id, "Ping", "{}", null, CancellationToken.None));
 
         f.Uow.Verify(u => u.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Consume_span_is_a_child_of_the_publishing_span_when_traceparent_is_present()
+    {
+        var started = new List<Activity>();
+        using var listener = NewListener(started);
+        var f = new Fixture();
+        var id = Guid.NewGuid();
+        f.Store.Setup(s => s.TryMarkAsync("svc", id, f.Uow.Object, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var parent = new ActivityContext(ActivityTraceId.CreateRandom(), ActivitySpanId.CreateRandom(), ActivityTraceFlags.Recorded);
+        var traceParent = $"00-{parent.TraceId}-{parent.SpanId}-01";
+
+        await f.Dispatcher.DispatchAsync("svc", id, "Ping", "{}", "corr", CancellationToken.None, traceParent);
+
+        var consume = Assert.Single(started, a => a.OperationName == "consume Ping");
+        Assert.Equal(parent.TraceId, consume.TraceId);
+        Assert.Equal(parent.SpanId, consume.ParentSpanId);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("garbage")]
+    public async Task Consume_span_starts_a_new_trace_when_traceparent_is_absent_or_invalid(string? traceParent)
+    {
+        var started = new List<Activity>();
+        using var listener = NewListener(started);
+        var f = new Fixture();
+        var id = Guid.NewGuid();
+        f.Store.Setup(s => s.TryMarkAsync("svc", id, f.Uow.Object, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        var handled = await f.Dispatcher.DispatchAsync("svc", id, "Ping", "{}", null, CancellationToken.None, traceParent);
+
+        Assert.True(handled);
+        var consume = Assert.Single(started, a => a.OperationName == "consume Ping");
+        Assert.Equal(default, consume.ParentSpanId);
+    }
+
+    private static ActivityListener NewListener(List<Activity> started)
+    {
+        var listener = new ActivityListener
+        {
+            ShouldListenTo = s => s.Name == "AuditFlow.Messaging",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStarted = started.Add
+        };
+        ActivitySource.AddActivityListener(listener);
+        return listener;
     }
 
     [Fact]
