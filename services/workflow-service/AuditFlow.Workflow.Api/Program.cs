@@ -6,6 +6,7 @@ using AuditFlow.BuildingBlocks.Security;
 using AuditFlow.Contracts.Events;
 using AuditFlow.Workflow.Api.Data;
 using AuditFlow.Workflow.Api.Domain;
+using AuditFlow.Workflow.Api.Endpoints;
 using AuditFlow.Workflow.Api.Handlers;
 
 DateOnlyTypeHandler.Register();
@@ -25,10 +26,13 @@ builder.Services.AddSingleton<IRuleSetProvider, RuleSetProvider>();
 builder.Services.AddSingleton<IWorkflowRepository, WorkflowRepository>();
 builder.Services.AddScoped<IDataSeeder, RuleSetSeeder>();
 builder.Services.AddScoped<ProvisioningService>();
+builder.Services.AddScoped<Recomputer>();
+builder.Services.AddScoped<WorkflowService>();
 builder.Services.AddEventHandler<EngagementCreatedPayload, EngagementCreatedHandler>(EventTypes.EngagementCreated);
 
 var app = builder.Build();
 app.UseAuditFlowDefaults();
+app.MapWorkflowEndpoints();
 app.Run();
 
 public partial class Program;
