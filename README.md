@@ -70,6 +70,7 @@ Create an engagement (it appears with "Setting up the workflow..." for a second)
 | auth / engagement / workflow / attachment / review / notification | 5001 to 5006 |
 | SQL Server | 1433 |
 | Service Bus emulator (AMQP / management) | 5672 / 5300 |
+| OpenTelemetry dashboard (UI / OTLP), `-Observability` only | 18888 / 4317 |
 
 Each service: `/health`, `/health/live`, `/swagger`. The gateway proxies `/health/{service}`.
 
@@ -96,9 +97,14 @@ screen, degraded tabs, seed history), decisions applied from events, the full su
 the SSE hub, tailer and session (replay, resync, reauth, heartbeat, Viewer filtering) in `AuditFlow.Notification.Tests`.
 
 ## Telemetry
-OpenTelemetry in every service. `APPLICATIONINSIGHTS_CONNECTION_STRING` -> Application Insights; `OTEL_EXPORTER_OTLP_ENDPOINT` -> OTLP;
+OpenTelemetry traces, metrics and logs in every service. `APPLICATIONINSIGHTS_CONNECTION_STRING` -> Application Insights; `OTEL_EXPORTER_OTLP_ENDPOINT` -> OTLP;
 otherwise set `AuditFlow__Telemetry__Console=true` for console traces. The correlation id (`X-Correlation-Id`) flows through
-HTTP, outbox rows, Service Bus messages and handler logs.
+HTTP, outbox rows, Service Bus messages and handler logs, and the W3C `traceparent` is stored in the outbox row so a consumer's span joins the trace of the request that caused it.
+
+```powershell
+./infra/local/up.ps1 -Observability     # also starts the Aspire dashboard: http://localhost:18888
+```
+See [docs/architecture/observability.md](docs/architecture/observability.md) for the metrics list, readiness checks and a trace walkthrough.
 
 ## Dev-only settings
 The SQL password in compose and appsettings, the demo users and their password, and the database-stored signing key are local-dev
