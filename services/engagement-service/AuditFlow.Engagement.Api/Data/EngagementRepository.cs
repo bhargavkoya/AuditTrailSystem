@@ -35,8 +35,27 @@ public sealed record ListResult(IReadOnlyList<ListRow> Items, IReadOnlyDictionar
 /// <summary>An engagement together with the caller's role on it (null when the caller is not a participant).</summary>
 public sealed record EngagementWithRole(EngagementRow Engagement, EngagementRole? MyRole);
 
+public sealed record DetailsUpdate(string Name, string PeriodType, string Region, Guid ReviewerUserId);
+
 public interface IEngagementRepository
 {
+    /// <summary>
+    /// Updates details only while Draft and only if the version still matches. Returns the new version, or null when the
+    /// guard failed (stale version or no longer Draft).
+    /// </summary>
+    Task<byte[]?> UpdateDetailsAsync(IUnitOfWork uow, string engagementId, DetailsUpdate update, byte[] expectedVersion, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>Swaps the Reviewer participant row.</summary>
+    Task ReplaceReviewerAsync(IUnitOfWork uow, string engagementId, Guid oldReviewerId, ParticipantRow newReviewer, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>The only status writer: <c>WHERE Status = @from</c>. Returns the new version, or null when the status was not @from.</summary>
+    Task<byte[]?> TransitionAsync(IUnitOfWork uow, string engagementId, EngagementStatus from, EngagementStatus to, DateTimeOffset now, CancellationToken ct);
+
+    Task TouchActivityAsync(IUnitOfWork uow, string engagementId, DateTimeOffset now, CancellationToken ct);
+
+    Task<EngagementRow?> GetRowAsync(IUnitOfWork uow, string engagementId, CancellationToken ct);
+
+
     Task<string> NextIdAsync(IUnitOfWork uow, CancellationToken ct);
     Task InsertAsync(IUnitOfWork uow, NewEngagement engagement, CancellationToken ct);
     Task<bool> AnyAsync(CancellationToken ct);
@@ -47,6 +66,41 @@ public interface IEngagementRepository
 
 public sealed class EngagementRepository(IDbConnectionFactory connections) : IEngagementRepository
 {
+    public Task<byte[]?> UpdateDetailsAsync(IUnitOfWork uow, string engagementId, DetailsUpdate u, byte[] expectedVersion, DateTimeOffset now, CancellationToken ct)
+        => uow.QuerySingleOrDefaultAsync<byte[]>("""
+            UPDATE dbo.Engagements
+            SET Name = @Name, PeriodType = @PeriodType, Region = @Region, ReviewerUserId = @ReviewerUserId, LastActivityAt = @now
+            OUTPUT inserted.RowVer
+            WHERE EngagementId = @engagementId AND RowVer = @expectedVersion AND Status = N'Draft'
+            """, new { engagementId, u.Name, u.PeriodType, u.Region, u.ReviewerUserId, expectedVersion, now }, ct);
+
+    public async Task ReplaceReviewerAsync(IUnitOfWork uow, string engagementId, Guid oldReviewerId, ParticipantRow newReviewer, DateTimeOffset now, CancellationToken ct)
+    {
+        await uow.ExecuteAsync(
+            "DELETE FROM dbo.EngagementParticipants WHERE EngagementId = @engagementId AND UserId = @oldReviewerId AND Role = N'Reviewer'",
+            new { engagementId, oldReviewerId }, ct);
+        await uow.ExecuteAsync("""
+            INSERT INTO dbo.EngagementParticipants (EngagementId, UserId, Role, DisplayName, AddedAt)
+            VALUES (@engagementId, @UserId, N'Reviewer', @DisplayName, @now)
+            """, new { engagementId, newReviewer.UserId, newReviewer.DisplayName, now }, ct);
+    }
+
+    public Task<byte[]?> TransitionAsync(IUnitOfWork uow, string engagementId, EngagementStatus from, EngagementStatus to, DateTimeOffset now, CancellationToken ct)
+        => uow.QuerySingleOrDefaultAsync<byte[]>("""
+            UPDATE dbo.Engagements SET Status = @to, LastActivityAt = @now
+            OUTPUT inserted.RowVer
+            WHERE EngagementId = @engagementId AND Status = @from
+            """, new { engagementId, from = from.ToString(), to = to.ToString(), now }, ct);
+
+    public Task TouchActivityAsync(IUnitOfWork uow, string engagementId, DateTimeOffset now, CancellationToken ct)
+        => uow.ExecuteAsync("UPDATE dbo.Engagements SET LastActivityAt = @now WHERE EngagementId = @engagementId", new { engagementId, now }, ct);
+
+    public Task<EngagementRow?> GetRowAsync(IUnitOfWork uow, string engagementId, CancellationToken ct)
+        => uow.QuerySingleOrDefaultAsync<EngagementRow>("""
+            SELECT EngagementId, Name, PeriodType, Region, OwnerUserId, ReviewerUserId, Status, CreatedAt, LastActivityAt, RowVer
+            FROM dbo.Engagements WHERE EngagementId = @engagementId
+            """, new { engagementId }, ct);
+
     public async Task<string> NextIdAsync(IUnitOfWork uow, CancellationToken ct)
         => $"ENG-{await uow.QuerySingleOrDefaultAsync<int>("SELECT NEXT VALUE FOR dbo.EngagementSeq", null, ct)}";
 

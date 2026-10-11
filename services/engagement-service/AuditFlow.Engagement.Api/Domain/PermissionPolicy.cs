@@ -17,6 +17,9 @@ public static class PermissionPolicy
     /// <summary>Home roles allowed to create engagements (global capability, not per engagement).</summary>
     public static bool CanCreateEngagement(EngagementRole homeRole) => IsEditor(homeRole);
 
+    /// <summary>Name, period type, region and reviewer can only change while the engagement is still a Draft.</summary>
+    public static bool CanEditDetails(EngagementRole role, EngagementStatus status) => IsEditor(role) && status == EngagementStatus.Draft;
+
     public static IReadOnlyList<string> CapabilitiesFor(EngagementRole role, EngagementStatus status)
     {
         var capabilities = new List<string> { Capabilities.View };
@@ -53,6 +56,7 @@ public static class PermissionPolicy
         var actions = new List<string> { EngagementActions.Open };
 
         if (capabilities.Contains(Capabilities.Edit)) actions.Add(EngagementActions.Edit);
+        if (CanEditDetails(role, status)) actions.Add(EngagementActions.EditDetails);
         if (capabilities.Contains(Capabilities.Submit)) actions.Add(EngagementActions.Submit);
         if (capabilities.Contains(Capabilities.Review)) actions.Add(EngagementActions.Review);
 

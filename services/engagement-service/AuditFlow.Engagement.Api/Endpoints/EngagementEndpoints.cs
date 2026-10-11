@@ -35,6 +35,14 @@ public static class EngagementEndpoints
             return Results.Ok(engagement);
         });
 
+        // Draft only; the version of the last read travels in If-Match (409 with the current version when stale).
+        group.MapPatch("/{id}", async (string id, UpdateEngagementRequest request, EngagementService service, HttpContext http, CancellationToken ct) =>
+        {
+            var updated = await service.UpdateAsync(id, request, http.Request.GetIfMatchToken(), ct);
+            http.Response.Headers.ETag = RowVersion.ToETag(updated.Version);
+            return Results.Ok(updated);
+        });
+
         group.MapGet("/{id}/participants", (string id, EngagementService service, CancellationToken ct)
             => service.GetParticipantsAsync(id, ct));
 
