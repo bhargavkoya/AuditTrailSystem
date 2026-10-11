@@ -18,6 +18,13 @@ public sealed class ForbiddenException(string message) : Exception(message);
 
 public sealed class NotFoundException(string message) : Exception(message);
 
+/// <summary>Submission refused because required validations fail. Maps to 422 with the blocking issues listed.</summary>
+public sealed class SubmissionBlockedException(IReadOnlyList<AuditFlow.Contracts.Api.IssueDto> issues, string message)
+    : Exception(message)
+{
+    public IReadOnlyList<AuditFlow.Contracts.Api.IssueDto> Issues { get; } = issues;
+}
+
 /// <summary>Optimistic concurrency conflict (row version mismatch). Maps to 409.</summary>
 public sealed class ConcurrencyException(string? currentVersion = null, string? resource = null) : Exception("The resource was modified by someone else.")
 {
@@ -34,6 +41,7 @@ public sealed class AuditFlowExceptionHandler(ILogger<AuditFlowExceptionHandler>
         var problem = exception switch
         {
             ValidationFailedException v => new ValidationProblemDetails(v.Errors) { Status = 422, Title = "Validation failed" },
+            SubmissionBlockedException s => WithIssues(new ProblemDetails { Status = 422, Title = "Submission blocked", Detail = s.Message }, s.Issues),
             ForbiddenException f => new ProblemDetails { Status = 403, Title = "Forbidden", Detail = f.Message },
             NotFoundException n => new ProblemDetails { Status = 404, Title = "Not found", Detail = n.Message },
             ConcurrencyException c => WithVersion(new ProblemDetails { Status = 409, Title = "Conflict", Detail = c.Message }, c.CurrentVersion, c.Resource),
@@ -52,6 +60,12 @@ public sealed class AuditFlowExceptionHandler(ILogger<AuditFlowExceptionHandler>
         context.Response.StatusCode = problem.Status!.Value;
         await context.Response.WriteAsJsonAsync(problem, problem.GetType(), options: null, contentType: "application/problem+json", cancellationToken);
         return true;
+    }
+
+    private static ProblemDetails WithIssues(ProblemDetails p, IReadOnlyList<AuditFlow.Contracts.Api.IssueDto> issues)
+    {
+        p.Extensions["issues"] = issues;
+        return p;
     }
 
     private static ProblemDetails WithVersion(ProblemDetails p, string? version, string? resource)

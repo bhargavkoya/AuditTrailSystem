@@ -43,6 +43,14 @@ public static class EngagementEndpoints
             return Results.Ok(updated);
         });
 
+        // The submit decision is the state machine's plus workflow readiness (422 with the blocking issues).
+        group.MapPost("/{id}/submit", async (string id, EngagementService service, HttpContext http, CancellationToken ct) =>
+        {
+            var submitted = await service.SubmitAsync(id, http.Request.Headers.IfMatch.ToString(), ct);
+            http.Response.Headers.ETag = RowVersion.ToETag(submitted.Version);
+            return Results.Ok(submitted);
+        });
+
         group.MapGet("/{id}/participants", (string id, EngagementService service, CancellationToken ct)
             => service.GetParticipantsAsync(id, ct));
 

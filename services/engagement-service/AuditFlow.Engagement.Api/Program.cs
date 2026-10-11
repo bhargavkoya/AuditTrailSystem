@@ -21,9 +21,17 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IEngagementRepository, EngagementRepository>();
 builder.Services.AddScoped<EngagementService>();
 builder.Services.AddScoped<WorkActivityHandler>();
+builder.Services.AddScoped<ReviewDecisionApplier>();
+builder.Services.AddEventHandler<ReviewApprovedPayload, ReviewApprovedHandler>(EventTypes.ReviewApproved);
+builder.Services.AddEventHandler<ReviewRejectedPayload, ReviewRejectedHandler>(EventTypes.ReviewRejected);
 builder.Services.AddEventHandler<SectionUpdatedPayload, SectionUpdatedHandler>(EventTypes.SectionUpdated);
 builder.Services.AddEventHandler<ConfigurationChangedPayload, ConfigurationChangedHandler>(EventTypes.ConfigurationChanged);
 builder.Services.AddScoped<IDataSeeder, DemoEngagementSeeder>();
+builder.Services.AddHttpClient<IWorkflowReadinessClient, WorkflowReadinessClient>(client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["Services:Workflow:BaseUrl"] ?? "http://localhost:5003");
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
 builder.Services.AddHttpClient<IUserDirectoryClient, UserDirectoryClient>(client =>
     client.BaseAddress = new Uri(builder.Configuration["Services:Auth:BaseUrl"] ?? "http://localhost:5001"));
 
