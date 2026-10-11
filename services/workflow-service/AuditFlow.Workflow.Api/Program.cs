@@ -29,6 +29,9 @@ builder.Services.AddScoped<ProvisioningService>();
 builder.Services.AddScoped<Recomputer>();
 builder.Services.AddScoped<WorkflowService>();
 builder.Services.AddEventHandler<EngagementCreatedPayload, EngagementCreatedHandler>(EventTypes.EngagementCreated);
+builder.Services.AddEventHandler<EngagementUpdatedPayload, EngagementUpdatedHandler>(EventTypes.EngagementUpdated);
+builder.Services.AddEventHandler<AttachmentAddedPayload, AttachmentAddedHandler>(EventTypes.AttachmentAdded);
+// EngagementStatusChanged (access-cache eviction) is registered by AddEngagementAccessClient.
 
 var app = builder.Build();
 app.UseAuditFlowDefaults();
