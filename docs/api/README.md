@@ -1,4 +1,4 @@
-# API reference (Phases 1 and 2)
+# API reference (Phases 1 to 3)
 
 All routes below go through the gateway (`http://localhost:5000`). Each service also serves Swagger at `/swagger`
 (auth :5001, engagement :5002, ...). Authenticated routes take `Authorization: Bearer <accessToken>`.
@@ -23,6 +23,7 @@ Errors are RFC 7807 problem details (`422` carries an `errors` map). Every respo
 | GET | `/engagements?scope=&status=&q=&page=&pageSize=` | Auth, own participations only | `scope`: `participating` (default), `owned`, `assigned`, `reviewing`; `status`: any lifecycle status; both case-insensitive. Returns `items`, `counts` for every status (ignoring the status filter), `total` |
 | GET | `/engagements/{id}` | participant (else 403; unknown id 404) | `status`, `myRole`, `allowedActions[]`, `capabilities[]`, `version` (also `ETag`) |
 | GET | `/engagements/{id}/participants` | participant | names and roles |
+| POST | `/engagements/{id}/submit` | Auditor / Co-Auditor participant, status In Progress | **Phase 3.** No body. Asks workflow-service for readiness: **422** with `issues[]` (the blocking errors) when it fails; **403** from any other status or role; 409 only if `If-Match` is sent and stale (optional, see ADR 0009). Success: `200` with the engagement (status `UnderReview`), emits `EngagementSubmitted` and `EngagementStatusChanged` in one transaction |
 
 Create body:
 ```json
@@ -71,13 +72,42 @@ blank clears a non-checkbox field. Unknown fields and wrong types are rejected w
 Max 10 MB, any type. A new upload at the same scope **replaces** the previous file (only the latest is kept). 422 for empty / oversized files or
 invalid scope; the file name is sanitized and stored as metadata only.
 
-## Roles at a glance (Phase 2 behaviour)
+## Review (review-service, Phase 3)
+
+The review screen is a distinct view over the same engagement. Content is read-only; the backend decides `canComment` and `canDecide`.
+
+| Method | Path | Rule | Notes |
+|---|---|---|---|
+| GET | `/reviews/{engagementId}` | participant except **Viewer (403)** | `{engagement, cycle, canComment, canDecide, tabs[{tabNo, title, available, content}], validation, comments[], history[]}`. Composed live from engagement-service and workflow-service; a failing tab comes back `available: false` and the rest still loads. `cycle` is 0 before the first submission (then nothing can be commented or decided). Auditors and Co-Auditors get the same view with both flags false |
+| POST | `/reviews/{engagementId}/comments` | `comment.add` (assigned Reviewer, Under Review) | `{tabNo 1-5, body (max 2000)}` -> 201 comment. **422** invalid tab or body; **403** otherwise; **409** if the review cycle is not open yet. Emits `ReviewerCommentAdded` (ids only) |
+| POST | `/reviews/{engagementId}/approve` | `review.decide` | optional `{comment}` -> **202** `{decisionId, cycle, decision}`. The status change follows from the `ReviewApproved` event (about a second) |
+| POST | `/reviews/{engagementId}/reject` | `review.decide` | `{comment}` **mandatory: 400** when missing or blank. 202 as above; emits `ReviewRejected`. **409** if the cycle already has a decision |
+
+Comments are flat, append-only, per tab and per review cycle. Each submission opens a cycle (1, 2, ...); one decision per cycle (unique constraint).
+
+## Live updates (notification-service, Phase 3)
+
+`GET /engagements/{id}/events/stream` (`text/event-stream`, Bearer header, so use a fetch-based client). Requires `engagement.view`.
+
+| Frame | Meaning |
+|---|---|
+| `event: ready` (`id` = current position) | stream open; refetch what you show to close the gap since your last read |
+| `id: <seq>` `event: <EventType>` `data: <envelope>` | a domain event for this engagement. `data` carries names, ids and versions, never field values; refetch the changed section through the normal API |
+| `event: resync` | you missed too much (gap over 500 events or a slow consumer); refetch everything |
+| `event: reauth` | the token expired; the stream closes |
+| `: heartbeat` | every 15 s |
+
+Reconnect with `Last-Event-ID` (or `?lastEventId=`) to replay what was missed for that engagement. Callers without `attachment.view` never
+receive `AttachmentAdded`; callers without `comment.view` never receive `ReviewerCommentAdded` (so Viewers get neither).
+
+## Roles at a glance
 
 | | View tabs | Edit / upload | See attachments | Edit details |
 |---|---|---|---|---|
 | Auditor, Co-Auditor | yes | yes (not Under Review / Approved) | yes | Draft only |
-| Reviewer | yes, read-only | no | yes, download only | no |
-| Viewer | yes, read-only | no | **no** (403, and no attachment info in the tab view) | no |
+| Reviewer | yes, read-only | no (comments and decisions on the review screen only, while Under Review) | yes, download only | no |
+| Viewer | yes, read-only | no | **no** (403, and no attachment info in the tab view) | no | 
+
 
 ## Internal (not routed by the gateway)
 
@@ -85,14 +115,8 @@ invalid scope; the file name is sanitized and stored as metadata only.
 |---|---|---|---|
 | POST | `/internal/users/lookup` | auth | batch user lookup for validation and display-name snapshots |
 | GET | `/internal/engagements/{id}/access` | engagement | `{role, status, version, capabilities[]}` for the calling user (cached 30 s by consumers, evicted on `EngagementStatusChanged`) |
-| GET | `/internal/engagements/{id}/submission-readiness` | workflow | `{readyToSubmit, errors[]}`; consumed by submit in Phase 3 |
+| GET | `/internal/engagements/{id}/submission-readiness` | workflow | `{readyToSubmit, errors[]}`; consumed by `POST /engagements/{id}/submit` |
 | GET | `/internal/engagements/{id}/sections/{sectionKey}` | workflow | `{exists, visible, tabNo, attachmentAllowed}` for attachment-service |
-
-## Dev only
-
-| Method | Path | Service | Notes |
-|---|---|---|---|
-| GET | `/dev/events/recent?engagementId=&take=` | notification (:5006, Development / compose) | events received so far; removed when SSE arrives (Phase 3) |
 
 ## Demo users (password `Passw0rd!`, dev only)
 
