@@ -43,8 +43,27 @@ public sealed record EngagementCreatedPayload(
     IReadOnlyList<ParticipantInfo> Participants,
     ConfigurationInfo Configuration);
 
-/// <summary>EngagementUpdated v1 (declared in Phase 1, first published in Phase 2).</summary>
-public sealed record EngagementUpdatedPayload(IReadOnlyList<string> ChangedFields, string Version);
+/// <summary>
+/// EngagementUpdated v1 (published from Phase 2). Carries the new values of the fields workflow uses as rule inputs,
+/// so workflow-service never calls back; null means unchanged.
+/// </summary>
+public sealed record EngagementUpdatedPayload(
+    IReadOnlyList<string> ChangedFields, string Version, string? PeriodType = null, string? Region = null);
 
-/// <summary>EngagementStatusChanged v1 (declared in Phase 1, first published in Phase 3).</summary>
+/// <summary>EngagementStatusChanged v1 (first published in Phase 2 by the work-started / rework-started transitions).</summary>
 public sealed record EngagementStatusChangedPayload(EngagementStatus From, EngagementStatus To, string Reason, string Version);
+
+public sealed record AffectedSection(string SectionKey, bool Visible);
+
+/// <summary>ConfigurationChanged v1: Tab 1 changed; lists the sections whose visibility flipped. No values.</summary>
+public sealed record ConfigurationChangedPayload(
+    IReadOnlyList<string> ChangedKeys, IReadOnlyList<AffectedSection> AffectedSections, string Version);
+
+/// <summary>SectionUpdated v1: names of changed fields and the new section version. Never values.</summary>
+public sealed record SectionUpdatedPayload(int TabNo, string SectionKey, IReadOnlyList<string> ChangedFields, string Version);
+
+/// <summary>ValidationSummaryChanged v1. <c>Version</c> is the summary hash.</summary>
+public sealed record ValidationSummaryChangedPayload(int Errors, int Warnings, int Infos, bool ReadyToSubmit, string Version);
+
+/// <summary>AttachmentAdded v1.</summary>
+public sealed record AttachmentAddedPayload(AttachmentScope Scope, int? TabNo, string? SectionKey, Guid AttachmentId, string FileName);
