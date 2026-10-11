@@ -45,7 +45,7 @@ public class NotificationIntegrationTests(SqlServerFixture sql)
     }
 
     [Fact]
-    public async Task Reader_returns_newest_first_and_filters_by_engagement()
+    public async Task Reader_returns_rows_after_a_sequence_oldest_first_and_can_filter_by_engagement()
     {
         var db = await sql.CreateDatabaseAsync(typeof(EventLogHandler).Assembly);
         var consumer = Consumer(db);
@@ -56,12 +56,24 @@ public class NotificationIntegrationTests(SqlServerFixture sql)
         }
         var reader = new EventLogReader(db.Connections);
 
-        var all = await reader.RecentAsync(null, 10, default);
-        var eng1 = await reader.RecentAsync("ENG-1", 10, default);
+        var all = await reader.ReadAfterAsync(null, 0, 10, default);
+        var eng1 = await reader.ReadAfterAsync("ENG-1", 0, 10, default);
+        var afterFirst = await reader.ReadAfterAsync(null, all[0].Seq, 10, default);
 
         Assert.Equal(3, all.Count);
-        Assert.True(all[0].Seq > all[1].Seq);
+        Assert.True(all[0].Seq < all[1].Seq);
         Assert.Equal(2, eng1.Count);
         Assert.All(eng1, r => Assert.Equal("ENG-1", r.EngagementId));
+        Assert.Equal(2, afterFirst.Count);
+        Assert.Equal(all[2].Seq, await reader.MaxSeqAsync(default));
+        Assert.Contains("\"eventType\":\"SectionUpdated\"", all[2].Envelope);
+    }
+
+    [Fact]
+    public async Task An_empty_log_has_sequence_zero()
+    {
+        var db = await sql.CreateDatabaseAsync(typeof(EventLogHandler).Assembly);
+
+        Assert.Equal(0, await new EventLogReader(db.Connections).MaxSeqAsync(default));
     }
 }
