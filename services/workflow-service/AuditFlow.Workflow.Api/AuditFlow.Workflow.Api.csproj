@@ -4,6 +4,11 @@
     <ProjectReference Include="..\..\building-blocks\AuditFlow.BuildingBlocks\AuditFlow.BuildingBlocks.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="RuleSets\*.json" />
+    <EmbeddedResource Include="Migrations\*.sql" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
