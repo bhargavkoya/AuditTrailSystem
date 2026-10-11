@@ -107,7 +107,7 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
 
         await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("untraced")), commit: true);
 
-        Assert.Null(await db.ScalarAsync<string?>("SELECT TraceParent FROM dbo.OutboxMessage"));
+        Assert.Equal(0, await db.ScalarAsync<int>("SELECT COUNT(*) FROM dbo.OutboxMessage WHERE TraceParent IS NOT NULL"));
         Assert.Equal(1, await NewDispatcher(db, Mock.Of<IEventBus>()).DispatchBatchAsync(CancellationToken.None));
     }
 
