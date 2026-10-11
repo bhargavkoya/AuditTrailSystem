@@ -97,6 +97,12 @@ public sealed class EventDispatcher(
             return false;
 
         using var correlation = CorrelationContext.Begin(correlationId ?? string.Empty);
+        using var logScope = logger.BeginScope(new Dictionary<string, object>
+        {
+            ["CorrelationId"] = correlationId ?? string.Empty,
+            ["EventType"] = eventType,
+            ["MessageId"] = messageId
+        });
 
         // Without a (valid) traceparent the consumer simply starts its own trace.
         ActivityContext.TryParse(traceParent, traceState, isRemote: true, out var parent);
@@ -142,12 +148,25 @@ public sealed class ServiceBusSubscriberHost(
     IEventDispatcher dispatcher,
     ILogger<ServiceBusSubscriberHost> logger) : BackgroundService
 {
+    /// <summary>
+    /// Handlers without a subscription would silently never run, so refuse to start instead. Checked here rather than in
+    /// <see cref="ExecuteAsync"/> because a throw there only reaches the host in some runtime versions.
+    /// </summary>
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        if (!registry.IsEmpty && string.IsNullOrWhiteSpace(options.Value.SubscriptionName))
+            throw new InvalidOperationException(
+                "Event handlers are registered but 'ServiceBus:SubscriptionName' is not configured (env var 'ServiceBus__SubscriptionName').");
+
+        return base.StartAsync(cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var o = options.Value;
-        if (registry.IsEmpty || string.IsNullOrWhiteSpace(o.SubscriptionName))
+        if (registry.IsEmpty)
         {
-            logger.LogInformation("No event handlers or subscription configured; subscriber idle");
+            logger.LogInformation("No event handlers registered; subscriber idle");
             return;
         }
 

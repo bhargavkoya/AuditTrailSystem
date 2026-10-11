@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AuditFlow.BuildingBlocks.Telemetry;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
@@ -66,6 +67,7 @@ public sealed class AuditFlowExceptionHandler(ILogger<AuditFlowExceptionHandler>
         }
 
         problem.Extensions["correlationId"] = context.Request.Headers["X-Correlation-Id"].ToString();
+        if (Activity.Current is { } span) problem.Extensions["traceId"] = span.TraceId.ToString();
         context.Response.StatusCode = problem.Status!.Value;
         await context.Response.WriteAsJsonAsync(problem, problem.GetType(), options: null, contentType: "application/problem+json", cancellationToken);
         return true;

@@ -22,12 +22,12 @@ builder.Services.AddSingleton<IReviewRepository, ReviewRepository>();
 builder.Services.AddScoped<ReviewService>();
 builder.Services.AddHttpClient<IEngagementClient, EngagementClient>(client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration["Services:Engagement:BaseUrl"] ?? "http://localhost:5002");
+    client.BaseAddress = builder.ServiceUrl("Engagement", "http://localhost:5002");
     client.Timeout = TimeSpan.FromSeconds(5);
 });
 builder.Services.AddHttpClient<IWorkflowViewClient, WorkflowViewClient>(client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration["Services:Workflow:BaseUrl"] ?? "http://localhost:5003");
+    client.BaseAddress = builder.ServiceUrl("Workflow", "http://localhost:5003");
     client.Timeout = TimeSpan.FromSeconds(5);
 });
 builder.Services.AddEventHandler<EngagementSubmittedPayload, EngagementSubmittedHandler>(EventTypes.EngagementSubmitted);

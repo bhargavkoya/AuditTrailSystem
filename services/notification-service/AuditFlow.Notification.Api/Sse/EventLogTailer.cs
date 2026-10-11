@@ -9,8 +9,15 @@ namespace AuditFlow.Notification.Api.Sse;
 /// consumers, so every poll re-reads a window behind the last published row and skips what it already sent.
 /// </summary>
 public sealed class EventLogTailer(
-    IEventLogReader reader, EventHub hub, IOptions<SseOptions> options, ILogger<EventLogTailer> logger) : BackgroundService
+    IEventLogReader reader, EventHub hub, IOptions<SseOptions> options, ILogger<EventLogTailer> logger, TimeProvider? clock = null)
+    : BackgroundService
 {
+    private readonly TimeProvider clock = clock ?? TimeProvider.System;
+    private long lastPollTicks = (clock ?? TimeProvider.System).GetUtcNow().UtcTicks;
+
+    /// <summary>When the tailer last completed a poll (or was created). Read by the readiness check.</summary>
+    public DateTimeOffset LastPollAt => new(Interlocked.Read(ref lastPollTicks), TimeSpan.Zero);
+
     private readonly Queue<long> publishedOrder = new();
     private readonly HashSet<long> published = [];
     private long lastSeq;
@@ -57,6 +64,7 @@ public sealed class EventLogTailer(
     {
         var o = options.Value;
         var rows = await reader.ReadAfterAsync(null, Math.Max(0, lastSeq - o.TailerOverlap), 500, ct);
+        Interlocked.Exchange(ref lastPollTicks, clock.GetUtcNow().UtcTicks);
 
         var count = 0;
         foreach (var row in rows)

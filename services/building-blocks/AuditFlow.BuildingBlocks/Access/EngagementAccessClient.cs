@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using AuditFlow.BuildingBlocks.Data;
 using AuditFlow.BuildingBlocks.Errors;
 using AuditFlow.BuildingBlocks.Eventing;
+using AuditFlow.BuildingBlocks.Hosting;
 using AuditFlow.BuildingBlocks.Messaging;
 using AuditFlow.BuildingBlocks.Security;
 using AuditFlow.Contracts.Api;
@@ -124,7 +125,7 @@ public static class EngagementAccessExtensions
         builder.Services.AddSingleton<EngagementAccessCache>();
         builder.Services.AddHttpClient<IEngagementAccessClient, EngagementAccessClient>(client =>
         {
-            client.BaseAddress = new Uri(builder.Configuration["Services:Engagement:BaseUrl"] ?? "http://localhost:5002");
+            client.BaseAddress = builder.ServiceUrl("Engagement", "http://localhost:5002");
             client.Timeout = TimeSpan.FromSeconds(5);
         });
         builder.Services.AddEventHandler<EngagementStatusChangedPayload, AccessCacheEvictionHandler>(EventTypes.EngagementStatusChanged);
