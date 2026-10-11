@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '@shared/api/client'
+import { ConflictBanner } from '@shared/conflict/ConflictBanner'
+import { formatFieldValue, sameFieldValue } from '@shared/conflict/format'
+import { useConflictResolution, type ConflictItem } from '@shared/conflict/useConflictResolution'
+import type { LatestChange } from '@shared/conflict/useRemoteChanges'
 import type { Attachment, FieldValue, FieldView, SectionPatch, SectionView, TabView as TabViewModel } from '@shared/api/types'
 import { useSaveTab, useTab } from './api'
 import { AttachmentPanel } from './AttachmentPanel'
@@ -35,6 +39,37 @@ function describeRejections(errors: Record<string, string[]>, tab: TabViewModel)
   })
 }
 
+/**
+ * After a 409: for every value the user edited that someone else also changed, the pair (mine, current). Values nobody else
+ * touched stay as drafts; a draft that now equals the current value is dropped. Display only: the client never merges.
+ */
+function compareAfterConflict(before: TabViewModel, after: TabViewModel, drafts: Drafts) {
+  const items: ConflictItem[] = []
+  const kept: Drafts = {}
+  for (const [sectionKey, fields] of Object.entries(drafts)) {
+    const was = before.sections.find((s) => s.sectionKey === sectionKey)
+    const now = after.sections.find((s) => s.sectionKey === sectionKey)
+    const keptFields: Record<string, FieldValue> = {}
+    for (const [fieldKey, mine] of Object.entries(fields)) {
+      const wasField = was?.fields.find((f) => f.key === fieldKey)
+      const nowField = now?.fields.find((f) => f.key === fieldKey)
+      if (!now || !wasField || !nowField) { keptFields[fieldKey] = mine; continue }
+      if (sameFieldValue(nowField.type, wasField.value, nowField.value)) { keptFields[fieldKey] = mine; continue } // nobody else touched it
+      if (sameFieldValue(nowField.type, mine, nowField.value)) continue // converged: nothing left to save for this field
+      keptFields[fieldKey] = mine
+      items.push({
+        id: `${sectionKey}.${fieldKey}`,
+        group: now.title,
+        label: nowField.label,
+        mine: formatFieldValue(nowField.type, mine),
+        theirs: formatFieldValue(nowField.type, nowField.value),
+      })
+    }
+    if (Object.keys(keptFields).length > 0) kept[sectionKey] = keptFields
+  }
+  return { items, drafts: kept }
+}
+
 export function TabView({
   engagementId,
   tabNo,
@@ -45,6 +80,7 @@ export function TabView({
   canUpload,
   focusTarget,
   onFocused,
+  latestChange,
 }: {
   engagementId: string
   tabNo: number
@@ -56,12 +92,14 @@ export function TabView({
   canUpload: boolean
   focusTarget: FocusTarget | null
   onFocused: () => void
+  /** Who last changed what, from the live stream; names the other user when a save conflicts. */
+  latestChange: LatestChange
 }) {
   const queryClient = useQueryClient()
   const tab = useTab(engagementId, tabNo, true)
   const save = useSaveTab(engagementId, tabNo)
   const [savedAt, setSavedAt] = useState<number | null>(null)
-  const [conflict, setConflict] = useState<string | null>(null)
+  const conflict = useConflictResolution()
   const [rejections, setRejections] = useState<string[]>([])
 
   useEffect(() => {
@@ -102,8 +140,18 @@ export function TabView({
     onDraftsChange(next)
   }
 
+  function takeTheirs(item: ConflictItem) {
+    const [sectionKey, fieldKey] = item.id.split('.')
+    const sectionDrafts = { ...(drafts[sectionKey] ?? {}) }
+    delete sectionDrafts[fieldKey]
+    const next = { ...drafts, [sectionKey]: sectionDrafts }
+    if (Object.keys(sectionDrafts).length === 0) delete next[sectionKey]
+    onDraftsChange(next)
+    conflict.resolve(item.id)
+  }
+
   function submit() {
-    setConflict(null)
+    conflict.dismiss()
     setRejections([])
 
     const patches: SectionPatch[] = dirtySections.map(([sectionKey, fields]) => {
@@ -128,8 +176,16 @@ export function TabView({
       onError: (error) => {
         if (!(error instanceof ApiError)) return
         if (error.status === 409) {
-          const title = view.sections.find((s) => s.sectionKey === error.problem.resource)?.title
-          setConflict(title ?? 'a section on this tab')
+          // Re-read the tab, then compare what we edited with what is there now. The pre-save copy (view) is the baseline.
+          const resource = error.problem.resource
+          const subject = view.sections.find((s) => s.sectionKey === resource)?.title ?? 'a section on this tab'
+          void tab.refetch().then((result) => {
+            if (!result.data) return
+            const compared = compareAfterConflict(view, result.data, drafts)
+            onDraftsChange(compared.drafts)
+            const change = latestChange((c) => (c.kind === 'section' && c.tabNo === tabNo && (!resource || c.sectionKey === resource)) || (c.kind === 'configuration' && tabNo === 1))
+            conflict.open({ subject, by: change?.by ?? null, at: change?.at ?? null, items: compared.items })
+          })
         } else if (error.status === 422 && error.problem.errors) {
           setRejections(describeRejections(error.problem.errors, view))
         }
@@ -166,23 +222,13 @@ export function TabView({
         </div>
       </div>
 
-      {conflict && (
-        <div role="alert" className="flex flex-wrap items-center gap-3 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <span>
-            <strong>Someone else changed {conflict}.</strong> Nothing was saved. Your unsaved edits are still here.
-          </span>
-          <button
-            type="button"
-            className="rounded border border-amber-400 bg-white px-3 py-1 text-xs font-medium hover:bg-amber-100"
-            onClick={() => {
-              setConflict(null)
-              save.reset()
-              void tab.refetch()
-            }}
-          >
-            Load latest (keep my edits)
-          </button>
-        </div>
+      {conflict.state && (
+        <ConflictBanner
+          state={conflict.state}
+          onTakeTheirs={takeTheirs}
+          onKeepMine={(item) => conflict.resolve(item.id)}
+          onDismiss={conflict.dismiss}
+        />
       )}
 
       {rejections.length > 0 && (

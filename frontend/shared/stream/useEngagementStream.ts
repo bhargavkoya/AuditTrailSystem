@@ -3,6 +3,7 @@ import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { getAccessToken } from '../api/client'
 import type { StreamEnvelope, TabView } from '../api/types'
+import type { RemoteChange } from '../conflict/useRemoteChanges'
 
 export type StreamState = 'connecting' | 'live' | 'offline'
 
@@ -19,6 +20,9 @@ export interface StreamOptions {
   /** True when the user has unsaved edits in the given tab (and section, when given). */
   hasDraft: (tabNo: number, sectionKey?: string) => boolean
   onExternalChange: (change: ExternalChange) => void
+  /** Optional: told about other users' changes, so a later 409 can say who changed what. Own events are never reported. */
+  onRemoteChange?: (change: RemoteChange) => void
+  selfUserId?: string
 }
 
 class FatalStreamError extends Error {}
@@ -50,6 +54,10 @@ function refreshEverything(queryClient: QueryClient, id: string) {
 export function applyStreamEvent(queryClient: QueryClient, id: string, envelope: StreamEnvelope, options: StreamOptions) {
   const by = envelope.actor?.name ?? 'Someone'
   const payload = envelope.payload
+  const remote = (kind: RemoteChange['kind'], tabNo: number | null, sectionKey: string | null) => {
+    if (envelope.actor?.userId && envelope.actor.userId === options.selfUserId) return
+    options.onRemoteChange?.({ kind, by, at: Date.now(), tabNo, sectionKey })
+  }
 
   switch (envelope.eventType) {
     case 'SectionUpdated': {
@@ -59,12 +67,14 @@ export function applyStreamEvent(queryClient: QueryClient, id: string, envelope:
       const cached = queryClient.getQueryData<TabView>(['tab', id, tabNo])?.sections.find((s) => s.sectionKey === sectionKey)
       if (cached && compareVersions(cached.version, version) >= 0) return // we already have this version
 
+      remote('section', tabNo, sectionKey)
       invalidate(queryClient, ['tabs', id], ['validation-summary', id], ['engagement', id])
       if (options.hasDraft(tabNo, sectionKey)) options.onExternalChange({ id: envelope.eventId, tabNo, sectionKey, by })
       else invalidate(queryClient, ['tab', id, tabNo])
       return
     }
     case 'ConfigurationChanged': {
+      remote('configuration', 1, null)
       invalidate(queryClient, ['tabs', id], ['validation-summary', id], ['engagement', id], ['attachments', id])
       for (const tabNo of [2, 3, 4, 5]) invalidate(queryClient, ['tab', id, tabNo])
       if (options.hasDraft(1)) options.onExternalChange({ id: envelope.eventId, tabNo: 1, sectionKey: null, by })
@@ -78,10 +88,12 @@ export function applyStreamEvent(queryClient: QueryClient, id: string, envelope:
     case 'EngagementStatusChanged':
       return invalidate(queryClient, ['engagement', id], ['tabs', id], ['tab', id], ['validation-summary', id], ['attachments', id], ['review', id], ['engagements'])
     case 'EngagementUpdated':
+      remote('engagement', null, null)
       return invalidate(queryClient, ['engagement', id], ['tabs', id], ['tab', id], ['validation-summary', id], ['participants', id], ['engagements'])
     case 'EngagementSubmitted':
     case 'ReviewApproved':
     case 'ReviewRejected':
+      remote(envelope.eventType === 'EngagementSubmitted' ? 'engagement' : 'decision', null, null)
       return invalidate(queryClient, ['engagement', id], ['review', id], ['engagements'])
     case 'ReviewerCommentAdded':
       return invalidate(queryClient, ['review', id])

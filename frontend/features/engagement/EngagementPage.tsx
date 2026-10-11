@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError } from '@shared/api/client'
+import { useAuth } from '@shared/auth/AuthProvider'
+import { useRemoteChanges } from '@shared/conflict/useRemoteChanges'
 import type { Issue } from '@shared/api/types'
 import { useEngagementStream, type ExternalChange } from '@shared/stream/useEngagementStream'
 import { StatusBadge, roleLabel } from '@shared/ui/labels'
@@ -29,6 +31,8 @@ export function EngagementPage() {
   const [editing, setEditing] = useState(false)
   const [external, setExternal] = useState<ExternalChange[]>([])
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  const remoteChanges = useRemoteChanges()
 
   const engagement = useEngagement(id)
   const tabs = useTabs(id, engagement.isSuccess)
@@ -42,6 +46,8 @@ export function EngagementPage() {
   const draftsRef = useRef(drafts)
   draftsRef.current = drafts
   const live = useEngagementStream(id, {
+    onRemoteChange: remoteChanges.record,
+    selfUserId: user?.userId,
     hasDraft: (tabNo, sectionKey) => {
       const tabDrafts = draftsRef.current[tabNo] ?? {}
       return sectionKey ? Object.keys(tabDrafts[sectionKey] ?? {}).length > 0 : Object.values(tabDrafts).some((fields) => Object.keys(fields).length > 0)
@@ -161,7 +167,7 @@ export function EngagementPage() {
 
       {ready && (
         <div className="mt-5 space-y-5">
-          <SubmitBar engagement={e} summary={summary.data} hasUnsavedEdits={unsaved.size > 0} />
+          <SubmitBar engagement={e} summary={summary.data} hasUnsavedEdits={unsaved.size > 0} latestChange={remoteChanges.latest} />
 
           {summary.data && (
             <>
@@ -201,6 +207,7 @@ export function EngagementPage() {
                 canUpload={e.capabilities.includes(CAP_ATTACH_UPLOAD)}
                 focusTarget={focus}
                 onFocused={onFocused}
+                latestChange={remoteChanges.latest}
               />
             </div>
           </div>
@@ -219,7 +226,7 @@ export function EngagementPage() {
         </ul>
       </section>
 
-      {editing && <EditDetailsDialog engagement={e} onClose={() => setEditing(false)} />}
+      {editing && <EditDetailsDialog engagement={e} onClose={() => setEditing(false)} latestChange={remoteChanges.latest} />}
     </Shell>
   )
 }

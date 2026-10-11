@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiError } from '@shared/api/client'
+import { ConflictBanner } from '@shared/conflict/ConflictBanner'
 import { useEngagementStream } from '@shared/stream/useEngagementStream'
 import { StatusBadge, roleLabel } from '@shared/ui/labels'
 import { useAttachments } from '@features/engagement/api'
@@ -21,6 +22,7 @@ const noDrafts = () => false
 export function ReviewPage() {
   const { id = '' } = useParams()
   const [selected, setSelected] = useState(1)
+  const [alreadyDecided, setAlreadyDecided] = useState(false)
   const review = useReview(id)
   const live = useEngagementStream(id, { hasDraft: noDrafts, onExternalChange: () => {} })
   const canViewAttachments = review.data?.engagement.capabilities.includes(CAP_ATTACH_VIEW) ?? false
@@ -43,7 +45,8 @@ export function ReviewPage() {
   const tab = view.tabs.find((t) => t.tabNo === selected) ?? view.tabs[0]
   const tabTitles = Object.fromEntries(view.tabs.map((t) => [t.tabNo, t.title]))
   const currentComments = (tabNo: number) => view.comments.filter((c) => c.tabNo === tabNo && c.cycle === view.cycle).length
-  const decidedThisCycle = view.history.some((d) => d.cycle === view.cycle)
+  const recorded = view.history.find((d) => d.cycle === view.cycle)
+  const decidedThisCycle = recorded !== undefined
 
   return (
     <Shell id={id}>
@@ -63,6 +66,18 @@ export function ReviewPage() {
         </p>
         <p className="mt-2 text-xs text-slate-600">Read-only view. Content cannot be changed from here.</p>
       </header>
+
+      {alreadyDecided && recorded && (
+        <div className="mt-4">
+          <ConflictBanner
+            state={{ subject: 'this review', by: recorded.reviewerName, at: Date.parse(recorded.decidedAt), items: [] }}
+            onTakeTheirs={() => {}}
+            onKeepMine={() => {}}
+            onDismiss={() => setAlreadyDecided(false)}
+            emptyNote={`It was already decided in this cycle: ${recorded.decision}${recorded.comment ? ` ("${recorded.comment}")` : ''}. Your decision was not applied.`}
+          />
+        </div>
+      )}
 
       {decidedThisCycle && e.status === 'UnderReview' && (
         <p role="status" className="mt-4 rounded border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">
@@ -102,7 +117,7 @@ export function ReviewPage() {
         </div>
 
         <aside className="space-y-5">
-          {view.canDecide && <DecisionPanel engagementId={id} />}
+          {view.canDecide && <DecisionPanel engagementId={id} onAlreadyDecided={() => setAlreadyDecided(true)} />}
 
           <section aria-label="Validation summary" className="space-y-2 rounded-lg border bg-white p-4">
             <h2 className="font-semibold">Validation summary</h2>
