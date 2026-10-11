@@ -1,14 +1,59 @@
-import { useQuery } from '@tanstack/react-query'
-import { Link, useParams } from 'react-router-dom'
-import { api, ApiError } from '@shared/api/client'
-import type { EngagementDetail, Participant } from '@shared/api/types'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { ApiError } from '@shared/api/client'
+import type { Issue } from '@shared/api/types'
 import { StatusBadge, roleLabel } from '@shared/ui/labels'
+import { useAttachments, useEngagement, useParticipants, useTabs, useValidationSummary } from './api'
+import { AttachmentPanel } from './AttachmentPanel'
+import { EditDetailsDialog } from './EditDetailsDialog'
+import { TabNav } from './TabNav'
+import { TabView, type Drafts, type FocusTarget } from './TabView'
+import { ValidationBanners } from './ValidationBanners'
 
-/** Phase 1 placeholder: the header and participants come from the backend. The five-tab workflow arrives in Phase 2. */
+// Capability names are issued by the backend (contracts/api Capabilities); the client only checks for their presence.
+const CAP_ATTACH_VIEW = 'attachment.view'
+const CAP_ATTACH_UPLOAD = 'attachment.upload'
+
+/**
+ * The engagement workspace: header, backend validation banners, five tabs, attachments and participants.
+ * Everything shown (tabs, sections, editability, required flags, issues, upload rights) is decided by the backend.
+ */
 export function EngagementPage() {
   const { id = '' } = useParams()
-  const engagement = useQuery({ queryKey: ['engagement', id], queryFn: () => api<EngagementDetail>(`/engagements/${id}`), retry: false })
-  const participants = useQuery({ queryKey: ['participants', id], queryFn: () => api<Participant[]>(`/engagements/${id}/participants`), retry: false, enabled: engagement.isSuccess })
+  const [search, setSearch] = useSearchParams()
+  const [drafts, setDrafts] = useState<Record<number, Drafts>>({})
+  const [focus, setFocus] = useState<FocusTarget | null>(null)
+  const [editing, setEditing] = useState(false)
+
+  const engagement = useEngagement(id)
+  const tabs = useTabs(id, engagement.isSuccess)
+  const ready = tabs.data?.ready === true
+  const summary = useValidationSummary(id, ready)
+  const canViewAttachments = engagement.data?.capabilities.includes(CAP_ATTACH_VIEW) ?? false
+  const attachments = useAttachments(id, ready && canViewAttachments)
+  const participants = useParticipants(id, engagement.isSuccess)
+
+  const selected = Number(search.get('tab')) || 1
+  const unsaved = useMemo(
+    () => new Set(Object.entries(drafts).filter(([, d]) => Object.keys(d).length > 0).map(([tab]) => Number(tab))),
+    [drafts],
+  )
+
+  useEffect(() => {
+    if (unsaved.size === 0) return
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault()
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [unsaved])
+
+  const onFocused = useCallback(() => setFocus(null), [])
+  const selectTab = (tabNo: number) => setSearch({ tab: String(tabNo) }, { replace: true })
+
+  function navigateToIssue(issue: Issue) {
+    if (issue.tabNo === null) return
+    selectTab(issue.tabNo)
+    setFocus({ tabNo: issue.tabNo, sectionKey: issue.sectionKey, fieldKey: issue.fieldKey })
+  }
 
   if (engagement.isError) {
     const status = engagement.error instanceof ApiError ? engagement.error.status : 0
@@ -23,24 +68,86 @@ export function EngagementPage() {
   if (!engagement.data) return <Shell><p className="text-sm text-slate-500">Loading…</p></Shell>
 
   const e = engagement.data
+  const tabTitles = Object.fromEntries((tabs.data?.tabs ?? []).map((t) => [t.tabNo, t.title]))
+  const current = attachments.data ?? []
+  const engagementAttachment = current.find((a) => a.scope === 'Engagement') ?? null
+
   return (
     <Shell>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold">{e.name}</h1>
         <StatusBadge status={e.status} />
         <span className="rounded border px-2 py-0.5 text-xs">My role: {roleLabel[e.myRole]}</span>
+        {e.allowedActions.includes('editDetails') && (
+          <button type="button" onClick={() => setEditing(true)} className="rounded border px-3 py-1 text-xs font-medium hover:bg-slate-100">
+            Edit details
+          </button>
+        )}
+        {e.allowedActions.includes('review') && (
+          <Link to={`/engagements/${e.engagementId}/review`} className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600">
+            Go to review screen
+          </Link>
+        )}
       </div>
       <p className="mt-1 text-sm text-slate-500">
         <span className="font-mono">{e.engagementId}</span> · {e.region} · {e.periodType} · Reviewer: {e.reviewer.displayName}
       </p>
 
-      {e.allowedActions.includes('review') && (
-        <Link to={`/engagements/${e.engagementId}/review`} className="mt-4 inline-block rounded bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600">
-          Go to review screen
-        </Link>
+      {tabs.isError && <p role="alert" className="mt-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">Could not load the workflow.</p>}
+
+      {tabs.data && !ready && (
+        <p role="status" className="mt-6 rounded-lg border border-dashed p-6 text-center text-sm text-slate-500">
+          Setting up the workflow for this engagement… this page updates automatically.
+        </p>
       )}
 
-      <section className="mt-6">
+      {ready && (
+        <div className="mt-5 space-y-5">
+          {summary.data && (
+            <>
+              <p className="text-sm">
+                <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${summary.data.readyToSubmit ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                  {summary.data.readyToSubmit ? 'Ready to submit' : 'Not ready to submit'}
+                </span>
+                <span className="ml-2 text-slate-500">
+                  {summary.data.counts.errors} errors · {summary.data.counts.warnings} warnings · {summary.data.counts.infos} information
+                </span>
+              </p>
+              <ValidationBanners summary={summary.data} tabTitles={tabTitles} onNavigate={navigateToIssue} />
+            </>
+          )}
+
+          {canViewAttachments && (
+            <AttachmentPanel
+              engagementId={id}
+              title="Engagement attachment"
+              uploadPath="/attachments"
+              current={engagementAttachment}
+              canUpload={e.capabilities.includes(CAP_ATTACH_UPLOAD)}
+            />
+          )}
+
+          <div>
+            <TabNav tabs={tabs.data?.tabs ?? []} selected={selected} unsaved={unsaved} onSelect={selectTab} />
+            <div className="rounded-b-lg border border-t-0 bg-slate-50 p-4">
+              <TabView
+                key={selected}
+                engagementId={id}
+                tabNo={selected}
+                drafts={drafts[selected] ?? {}}
+                onDraftsChange={(next) => setDrafts((all) => ({ ...all, [selected]: next }))}
+                attachments={current}
+                canViewAttachments={canViewAttachments}
+                canUpload={e.capabilities.includes(CAP_ATTACH_UPLOAD)}
+                focusTarget={focus}
+                onFocused={onFocused}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <section className="mt-8">
         <h2 className="text-sm font-medium uppercase tracking-wide text-slate-500">Participants</h2>
         <ul className="mt-2 divide-y rounded-lg border bg-white">
           {participants.data?.map((p) => (
@@ -52,16 +159,14 @@ export function EngagementPage() {
         </ul>
       </section>
 
-      <p className="mt-8 rounded-lg border border-dashed p-6 text-center text-sm text-slate-400">
-        The five-tab workflow (Input Configuration → Reconciliation &amp; Submission) arrives in Phase 2.
-      </p>
+      {editing && <EditDetailsDialog engagement={e} onClose={() => setEditing(false)} />}
     </Shell>
   )
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto max-w-4xl p-6">
+    <div className="mx-auto max-w-5xl p-6">
       <Link to="/" className="text-sm text-slate-500 hover:underline">← Back to dashboard</Link>
       <div className="mt-3">{children}</div>
     </div>

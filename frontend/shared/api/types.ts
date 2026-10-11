@@ -90,3 +90,135 @@ export interface CreateEngagementRequest {
 }
 
 export type ListScope = 'participating' | 'owned' | 'assigned' | 'reviewing'
+
+// ---- Workflow (Phase 2). The backend decides visibility, editability, required flags and issues; the client renders them. ----
+
+export type IssueSeverity = 'Error' | 'Warning' | 'Information'
+export type IssueScope = 'Field' | 'Section' | 'Tab' | 'Engagement'
+export type VarianceIndicator = 'Ok' | 'Warning' | 'Significant' | 'Missing'
+export type FieldType = 'checkbox' | 'text' | 'number' | 'date' | 'documentation'
+export type FieldValue = boolean | string | number | null
+
+export interface Issue {
+  code: string
+  severity: IssueSeverity
+  scope: IssueScope
+  message: string
+  tabNo: number | null
+  sectionKey: string | null
+  fieldKey: string | null
+  isBlocking: boolean
+}
+
+export interface IssueCounts {
+  errors: number
+  warnings: number
+  infos: number
+}
+
+export interface TabSummary {
+  tabNo: number
+  title: string
+  issueCounts: IssueCounts
+}
+
+/** `ready` is false while workflow-service is still provisioning a new engagement. */
+export interface TabsResponse {
+  ready: boolean
+  tabs: TabSummary[]
+}
+
+export interface FieldView {
+  key: string
+  type: FieldType
+  label: string
+  value: FieldValue
+  required: boolean
+  editable: boolean
+  issues: Issue[]
+}
+
+/** Absent (null) for roles that cannot see attachments, e.g. Viewer. */
+export interface SectionAttachmentInfo {
+  allowed: boolean
+  required: boolean
+  canUpload: boolean
+  hasCurrent: boolean
+}
+
+export interface SectionView {
+  sectionKey: string
+  title: string
+  editable: boolean
+  version: string
+  fields: FieldView[]
+  attachment: SectionAttachmentInfo | null
+  issues: Issue[]
+}
+
+export interface ReconciliationRow {
+  comparisonKey: string
+  label: string
+  expected: number | null
+  actual: number | null
+  valueVariance: number | null
+  percentVariance: number | null
+  indicator: VarianceIndicator
+  isSignificant: boolean
+  isMissing: boolean
+}
+
+export interface TabView {
+  tabNo: number
+  title: string
+  editable: boolean
+  sections: SectionView[]
+  issues: Issue[]
+  reconciliation: ReconciliationRow[] | null
+}
+
+export interface ValidationSummary {
+  counts: IssueCounts
+  readyToSubmit: boolean
+  issues: Issue[]
+  reconciliation: ReconciliationRow[]
+}
+
+export interface VisibilityChange {
+  sectionKey: string
+  visible: boolean
+}
+
+export interface SaveTabResult {
+  tab: TabView
+  summary: ValidationSummary
+  visibilityChanges: VisibilityChange[]
+}
+
+export interface SectionPatch {
+  sectionKey: string
+  version: string
+  fields: Record<string, FieldValue>
+}
+
+export type AttachmentScope = 'Engagement' | 'Tab' | 'Section'
+
+export interface Attachment {
+  attachmentId: string
+  engagementId: string
+  scope: AttachmentScope
+  tabNo: number | null
+  sectionKey: string | null
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  uploadedByName: string
+  uploadedAt: string
+}
+
+export interface UpdateEngagementRequest {
+  name?: string
+  periodType?: string
+  region?: string
+  reviewerUserId?: string
+}
