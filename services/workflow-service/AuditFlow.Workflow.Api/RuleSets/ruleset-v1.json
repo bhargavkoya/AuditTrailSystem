@@ -12,12 +12,12 @@
       "key": "section-1-1", "tab": 1, "title": "Engagement setup", "order": 1,
       "attachment": { "allowed": false },
       "fields": [
-        { "key": "cfgEquities", "type": "checkbox", "label": "Equities", "fact": "cfg.equities" },
-        { "key": "cfgFixedIncome", "type": "checkbox", "label": "Fixed income", "fact": "cfg.fixedIncome" },
-        { "key": "cfgDerivatives", "type": "checkbox", "label": "Derivatives", "fact": "cfg.derivatives" },
-        { "key": "cfgFx", "type": "checkbox", "label": "Foreign exchange", "fact": "cfg.fx" },
-        { "key": "optReconciliation", "type": "checkbox", "label": "Include reconciliation", "fact": "opt.reconciliation" },
-        { "key": "optLegalReview", "type": "checkbox", "label": "Requires legal review", "fact": "opt.legalReview" },
+        { "key": "cfgEquities", "type": "checkbox", "label": "Equities", "source": "config:Equities", "fact": "cfg.equities" },
+        { "key": "cfgFixedIncome", "type": "checkbox", "label": "Fixed income", "source": "config:Fixed Income", "fact": "cfg.fixedIncome" },
+        { "key": "cfgDerivatives", "type": "checkbox", "label": "Derivatives", "source": "config:Derivatives", "fact": "cfg.derivatives" },
+        { "key": "cfgFx", "type": "checkbox", "label": "Foreign exchange", "source": "config:FX", "fact": "cfg.fx" },
+        { "key": "optReconciliation", "type": "checkbox", "label": "Include reconciliation", "source": "option:includeReconciliation", "fact": "opt.reconciliation" },
+        { "key": "optLegalReview", "type": "checkbox", "label": "Requires legal review", "source": "option:requiresLegalReview", "fact": "opt.legalReview" },
         { "key": "periodStart", "type": "date", "label": "Period start", "required": true },
         { "key": "periodEnd", "type": "date", "label": "Period end", "required": true },
         { "key": "scopeSummary", "type": "documentation", "label": "Scope summary", "maxLength": 2000 }

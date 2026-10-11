@@ -126,7 +126,7 @@ public sealed class ValidationEngine(IRuleEvaluator evaluator, IReconciliationCa
         return new WorkflowEvaluation(visibility, required, attachmentRequired, ordered, rows, Summarize(ordered));
     }
 
-    private static Facts BuildBaseFacts(RuleSet ruleSet, EvaluationContext context)
+    public static Facts BuildBaseFacts(RuleSet ruleSet, EvaluationContext context)
     {
         var facts = Facts.From(new Dictionary<string, object?>
         {

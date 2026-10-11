@@ -39,6 +39,7 @@ public sealed record SectionDefinition(
     public IReadOnlyList<RuleDefinition> SectionRules => Rules ?? [];
 }
 
+/// <param name="Source">How provisioning fills the field from EngagementCreated: "config:&lt;config type&gt;" or "option:&lt;option key&gt;".</param>
 /// <param name="Fact">Exposes the field's value to rules under this name (e.g. "cfg.derivatives"). Only for always-visible sections.</param>
 public sealed record FieldDefinition(
     string Key,
@@ -47,7 +48,8 @@ public sealed record FieldDefinition(
     bool Required = false,
     Condition? RequiredWhen = null,
     string? Fact = null,
-    int? MaxLength = null);
+    int? MaxLength = null,
+    string? Source = null);
 
 public sealed record AttachmentDefinition(bool Allowed = true, bool Required = false, Condition? RequiredWhen = null);
 
