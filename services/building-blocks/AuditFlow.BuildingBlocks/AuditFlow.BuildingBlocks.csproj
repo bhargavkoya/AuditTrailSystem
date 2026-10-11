@@ -23,5 +23,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\contracts\api\AuditFlow.Contracts.Api\AuditFlow.Contracts.Api.csproj" />
+    <ProjectReference Include="..\..\..\contracts\events\AuditFlow.Contracts.Events\AuditFlow.Contracts.Events.csproj" />
   </ItemGroup>
 </Project>

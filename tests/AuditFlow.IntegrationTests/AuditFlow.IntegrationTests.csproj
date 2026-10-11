@@ -26,6 +26,8 @@
     <ProjectReference Include="..\..\services\building-blocks\AuditFlow.BuildingBlocks\AuditFlow.BuildingBlocks.csproj" />
     <ProjectReference Include="..\..\services\engagement-service\AuditFlow.Engagement.Api\AuditFlow.Engagement.Api.csproj" />
     <ProjectReference Include="..\..\services\notification-service\AuditFlow.Notification.Api\AuditFlow.Notification.Api.csproj" />
+    <ProjectReference Include="..\..\services\workflow-service\AuditFlow.Workflow.Api\AuditFlow.Workflow.Api.csproj" />
+    <ProjectReference Include="..\..\services\attachment-service\AuditFlow.Attachment.Api\AuditFlow.Attachment.Api.csproj" />
   </ItemGroup>
 
 </Project>

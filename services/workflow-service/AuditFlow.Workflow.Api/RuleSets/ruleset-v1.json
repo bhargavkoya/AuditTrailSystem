@@ -1,0 +1,188 @@
+{
+  "version": 1,
+  "tabs": [
+    { "tabNo": 1, "title": "Input Configuration" },
+    { "tabNo": 2, "title": "Data Collection" },
+    { "tabNo": 3, "title": "Audit Procedures" },
+    { "tabNo": 4, "title": "Documentation & Notes" },
+    { "tabNo": 5, "title": "Reconciliation & Submission" }
+  ],
+  "sections": [
+    {
+      "key": "section-1-1", "tab": 1, "title": "Engagement setup", "order": 1,
+      "attachment": { "allowed": false },
+      "fields": [
+        { "key": "cfgEquities", "type": "checkbox", "label": "Equities", "source": "config:Equities", "fact": "cfg.equities" },
+        { "key": "cfgFixedIncome", "type": "checkbox", "label": "Fixed income", "source": "config:Fixed Income", "fact": "cfg.fixedIncome" },
+        { "key": "cfgDerivatives", "type": "checkbox", "label": "Derivatives", "source": "config:Derivatives", "fact": "cfg.derivatives" },
+        { "key": "cfgFx", "type": "checkbox", "label": "Foreign exchange", "source": "config:FX", "fact": "cfg.fx" },
+        { "key": "optReconciliation", "type": "checkbox", "label": "Include reconciliation", "source": "option:includeReconciliation", "fact": "opt.reconciliation" },
+        { "key": "optLegalReview", "type": "checkbox", "label": "Requires legal review", "source": "option:requiresLegalReview", "fact": "opt.legalReview" },
+        { "key": "periodStart", "type": "date", "label": "Period start", "required": true },
+        { "key": "periodEnd", "type": "date", "label": "Period end", "required": true },
+        { "key": "scopeSummary", "type": "documentation", "label": "Scope summary", "maxLength": 2000 }
+      ],
+      "rules": [
+        {
+          "id": "CONFIG_TYPE_REQUIRED", "severity": "Error", "scope": "Section",
+          "message": "Select at least one configuration type.",
+          "when": { "op": "not", "condition": { "op": "any", "conditions": [
+            { "op": "isTrue", "fact": "cfg.equities" }, { "op": "isTrue", "fact": "cfg.fixedIncome" },
+            { "op": "isTrue", "fact": "cfg.derivatives" }, { "op": "isTrue", "fact": "cfg.fx" } ] } }
+        },
+        {
+          "id": "PERIOD_END_BEFORE_START", "severity": "Error", "scope": "Field", "field": "periodEnd",
+          "message": "Period end must be on or after the period start.",
+          "when": { "op": "lt", "fact": "section-1-1.periodEnd", "other": "section-1-1.periodStart" }
+        }
+      ]
+    },
+    {
+      "key": "section-2-1", "tab": 2, "title": "Source data extract", "order": 1,
+      "attachment": { "allowed": true, "required": true },
+      "fields": [
+        { "key": "sourceSystem", "type": "text", "label": "Source system", "required": true, "maxLength": 200 },
+        { "key": "extractDate", "type": "date", "label": "Extract date", "required": true },
+        { "key": "recordCount", "type": "number", "label": "Record count" }
+      ],
+      "rules": [
+        {
+          "id": "RECORD_COUNT_MISSING", "severity": "Information", "scope": "Field", "field": "recordCount",
+          "message": "A record count helps the reviewer confirm completeness of the extract.",
+          "when": { "op": "isEmpty", "fact": "section-2-1.recordCount" }
+        }
+      ]
+    },
+    {
+      "key": "section-2-2", "tab": 2, "title": "Equities positions", "order": 2,
+      "visibleWhen": { "op": "isTrue", "fact": "cfg.equities" },
+      "fields": [
+        { "key": "bookValue", "type": "number", "label": "Book value", "required": true },
+        { "key": "ledgerValue", "type": "number", "label": "Ledger value", "requiredWhen": { "op": "isTrue", "fact": "opt.reconciliation" } }
+      ]
+    },
+    {
+      "key": "section-2-3", "tab": 2, "title": "Fixed income positions", "order": 3,
+      "visibleWhen": { "op": "isTrue", "fact": "cfg.fixedIncome" },
+      "fields": [
+        { "key": "bookValue", "type": "number", "label": "Book value", "required": true },
+        { "key": "ledgerValue", "type": "number", "label": "Ledger value", "requiredWhen": { "op": "isTrue", "fact": "opt.reconciliation" } }
+      ]
+    },
+    {
+      "key": "section-2-4", "tab": 2, "title": "Derivatives positions", "order": 4,
+      "visibleWhen": { "op": "isTrue", "fact": "cfg.derivatives" },
+      "fields": [
+        { "key": "bookValue", "type": "number", "label": "Book value", "required": true },
+        { "key": "ledgerValue", "type": "number", "label": "Ledger value", "requiredWhen": { "op": "isTrue", "fact": "opt.reconciliation" } }
+      ]
+    },
+    {
+      "key": "section-2-5", "tab": 2, "title": "Foreign exchange positions", "order": 5,
+      "visibleWhen": { "op": "isTrue", "fact": "cfg.fx" },
+      "fields": [
+        { "key": "bookValue", "type": "number", "label": "Book value", "required": true },
+        { "key": "ledgerValue", "type": "number", "label": "Ledger value", "requiredWhen": { "op": "isTrue", "fact": "opt.reconciliation" } }
+      ]
+    },
+    {
+      "key": "section-3-1", "tab": 3, "title": "Standard procedures", "order": 1,
+      "fields": [
+        { "key": "proceduresCompleted", "type": "checkbox", "label": "Standard procedures completed", "required": true },
+        { "key": "performedBy", "type": "text", "label": "Performed by", "maxLength": 200 },
+        { "key": "performedOn", "type": "date", "label": "Performed on", "required": true },
+        { "key": "observations", "type": "documentation", "label": "Observations", "maxLength": 4000 }
+      ]
+    },
+    {
+      "key": "section-3-2", "tab": 3, "title": "Derivatives model validation", "order": 2,
+      "visibleWhen": { "op": "isTrue", "fact": "cfg.derivatives" },
+      "fields": [
+        { "key": "modelValidated", "type": "checkbox", "label": "Pricing model validated", "required": true },
+        { "key": "notes", "type": "documentation", "label": "Validation notes", "required": true, "maxLength": 4000 }
+      ]
+    },
+    {
+      "key": "section-3-3", "tab": 3, "title": "Legal review", "order": 3,
+      "visibleWhen": { "op": "isTrue", "fact": "opt.legalReview" },
+      "attachment": { "allowed": true, "required": true },
+      "fields": [
+        { "key": "reviewerName", "type": "text", "label": "Legal reviewer", "maxLength": 200 },
+        { "key": "signOffDate", "type": "date", "label": "Sign-off date", "required": true }
+      ]
+    },
+    {
+      "key": "section-4-1", "tab": 4, "title": "Audit summary", "order": 1,
+      "fields": [
+        { "key": "summary", "type": "documentation", "label": "Audit summary", "required": true, "maxLength": 4000 }
+      ],
+      "rules": [
+        {
+          "id": "SUMMARY_TOO_SHORT", "severity": "Warning", "scope": "Field", "field": "summary",
+          "message": "The audit summary is very short; consider adding more detail.",
+          "when": { "op": "all", "conditions": [
+            { "op": "not", "condition": { "op": "isEmpty", "fact": "section-4-1.summary" } },
+            { "op": "lengthLt", "fact": "section-4-1.summary", "value": 50 } ] }
+        }
+      ]
+    },
+    {
+      "key": "section-4-2", "tab": 4, "title": "Exceptions and notes", "order": 2,
+      "fields": [
+        { "key": "notes", "type": "documentation", "label": "Exceptions and notes", "maxLength": 4000 }
+      ],
+      "rules": [
+        {
+          "id": "VARIANCE_NOT_EXPLAINED", "severity": "Warning", "scope": "Field", "field": "notes",
+          "message": "A variance exists in the reconciliation; explain it in the notes.",
+          "when": { "op": "all", "conditions": [
+            { "op": "isTrue", "fact": "recon.hasVariance" },
+            { "op": "isEmpty", "fact": "section-4-2.notes" } ] }
+        }
+      ]
+    },
+    {
+      "key": "section-5-1", "tab": 5, "title": "Reconciliation", "order": 1,
+      "visibleWhen": { "op": "isTrue", "fact": "opt.reconciliation" },
+      "attachment": { "allowed": false },
+      "fields": [
+        { "key": "reconComment", "type": "documentation", "label": "Reconciliation comment", "maxLength": 4000 }
+      ],
+      "rules": [
+        {
+          "id": "SIGNIFICANT_VARIANCE_COMMENT", "severity": "Error", "scope": "Field", "field": "reconComment",
+          "message": "A comment is required while a significant variance exists.",
+          "when": { "op": "all", "conditions": [
+            { "op": "isTrue", "fact": "recon.hasSignificant" },
+            { "op": "isEmpty", "fact": "section-5-1.reconComment" } ] }
+        }
+      ]
+    },
+    {
+      "key": "section-5-2", "tab": 5, "title": "Submission readiness", "order": 2,
+      "attachment": { "allowed": false },
+      "fields": []
+    }
+  ],
+  "rules": [
+    {
+      "id": "RECONCILIATION_NOT_IN_SCOPE", "severity": "Information", "scope": "Tab", "tab": 5,
+      "message": "Reconciliation is not part of this engagement's scope.",
+      "when": { "op": "not", "condition": { "op": "isTrue", "fact": "opt.reconciliation" } }
+    }
+  ],
+  "reconciliation": {
+    "enabledWhen": { "op": "isTrue", "fact": "opt.reconciliation" },
+    "section": "section-5-1",
+    "pairs": [
+      { "key": "equities", "label": "Equities", "section": "section-2-2", "expected": "bookValue", "actual": "ledgerValue" },
+      { "key": "fixedIncome", "label": "Fixed income", "section": "section-2-3", "expected": "bookValue", "actual": "ledgerValue" },
+      { "key": "derivatives", "label": "Derivatives", "section": "section-2-4", "expected": "bookValue", "actual": "ledgerValue" },
+      { "key": "fx", "label": "Foreign exchange", "section": "section-2-5", "expected": "bookValue", "actual": "ledgerValue" }
+    ],
+    "thresholds": {
+      "percent": { "warning": 1, "significant": 5 },
+      "value": { "warning": 10000, "significant": 100000 }
+    }
+  }
+}

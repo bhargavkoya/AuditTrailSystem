@@ -19,15 +19,21 @@ public sealed class DemoEngagementSeeder(
     ILogger<DemoEngagementSeeder> logger) : IDataSeeder
 {
     private sealed record Seed(
-        string Name, string Period, string Region, EngagementStatus Status, DemoUser Owner, DemoUser Reviewer, DemoUser[] Others, int DaysAgo);
+        string Name, string Period, string Region, EngagementStatus Status, DemoUser Owner, DemoUser Reviewer, DemoUser[] Others, int DaysAgo,
+        string[] ConfigTypes, bool Reconciliation = false, bool LegalReview = false);
 
+    // Varied configurations so the demo shows different sections per engagement (Tab 1 drives section visibility).
     private static readonly Seed[] Seeds =
     [
-        new("EMEA Equities Q1 audit", "Quarterly", "EMEA", EngagementStatus.Draft, Alice, Rachel, [Bob, Victor], 1),
-        new("APAC FX controls review", "Half-Yearly", "APAC", EngagementStatus.InProgress, Alice, Rohan, [], 3),
-        new("AMER Derivatives annual audit", "Annual", "AMER", EngagementStatus.UnderReview, Bob, Rachel, [Alice, Victor], 6),
-        new("EMEA Fixed Income Q4 audit", "Quarterly", "EMEA", EngagementStatus.Approved, Alice, Rachel, [], 20),
-        new("APAC Equities half-year review", "Half-Yearly", "APAC", EngagementStatus.Rejected, Alice, Rohan, [Bob, Victor], 9)
+        new("EMEA Equities Q1 audit", "Quarterly", "EMEA", EngagementStatus.Draft, Alice, Rachel, [Bob, Victor], 1, ["Equities"]),
+        new("APAC FX controls review", "Half-Yearly", "APAC", EngagementStatus.InProgress, Alice, Rohan, [], 3,
+            ["FX", "Derivatives"], Reconciliation: true),
+        new("AMER Derivatives annual audit", "Annual", "AMER", EngagementStatus.UnderReview, Bob, Rachel, [Alice, Victor], 6,
+            ["Derivatives", "Equities"], Reconciliation: true),
+        new("EMEA Fixed Income Q4 audit", "Quarterly", "EMEA", EngagementStatus.Approved, Alice, Rachel, [], 20,
+            ["Fixed Income"], Reconciliation: true, LegalReview: true),
+        new("APAC Equities half-year review", "Half-Yearly", "APAC", EngagementStatus.Rejected, Alice, Rohan, [Bob, Victor], 9,
+            ["Equities", "FX"], Reconciliation: true)
     ];
 
     public async Task SeedAsync(CancellationToken ct)
@@ -55,7 +61,12 @@ public sealed class DemoEngagementSeeder(
 
             await repository.InsertAsync(uow, engagement, ct);
             await outbox.EnqueueAsync(uow, EngagementService.CreatedEvent(
-                engagement, new ConfigurationRequest(["Equities"], new Dictionary<string, bool> { ["includeReconciliation"] = true }), seeded: true), ct);
+                engagement,
+                new ConfigurationRequest(seed.ConfigTypes, new Dictionary<string, bool>
+                {
+                    ["includeReconciliation"] = seed.Reconciliation,
+                    ["requiresLegalReview"] = seed.LegalReview
+                }), seeded: true), ct);
             await uow.CommitAsync(ct);
         }
 

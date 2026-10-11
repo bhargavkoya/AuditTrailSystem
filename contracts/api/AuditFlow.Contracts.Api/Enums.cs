@@ -45,4 +45,6 @@ public static class EngagementActions
     public const string Edit = "edit";
     public const string Submit = "submit";
     public const string Review = "review";
+    /// <summary>Edit name / period / region / reviewer. Offered by the backend in Draft only.</summary>
+    public const string EditDetails = "editDetails";
 }

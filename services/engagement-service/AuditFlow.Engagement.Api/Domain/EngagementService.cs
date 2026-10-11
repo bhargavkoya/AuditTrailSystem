@@ -65,6 +65,71 @@ public sealed class EngagementService(
         return await GetAsync(engagementId, ct);
     }
 
+    /// <summary>
+    /// Draft-only edit of name / period / region / reviewer. The version (If-Match) must match; 409 otherwise.
+    /// A request that changes nothing is a no-op: no version bump, no event.
+    /// </summary>
+    public async Task<EngagementDetailDto> UpdateAsync(string engagementId, UpdateEngagementRequest request, string ifMatch, CancellationToken ct)
+    {
+        var (engagement, role) = await LoadAsync(engagementId, ct);
+        if (!PermissionPolicy.CanEditDetails(role, engagement.StatusValue))
+            throw new ForbiddenException("Engagement details can only be edited by an Auditor or Co-Auditor while the engagement is a Draft.");
+
+        var errors = UpdateEngagementValidator.Validate(request, catalogue.Value, engagement.OwnerUserId);
+        if (errors.Count > 0) throw new ValidationFailedException(errors);
+        var expectedVersion = RowVersion.FromToken(ifMatch);
+
+        var name = request.Name?.Trim() ?? engagement.Name;
+        var periodType = request.PeriodType ?? engagement.PeriodType;
+        var region = request.Region ?? engagement.Region;
+        var reviewerId = request.ReviewerUserId ?? engagement.ReviewerUserId;
+
+        var changed = new List<string>();
+        if (name != engagement.Name) changed.Add("name");
+        if (periodType != engagement.PeriodType) changed.Add("periodType");
+        if (region != engagement.Region) changed.Add("region");
+        if (reviewerId != engagement.ReviewerUserId) changed.Add("reviewerUserId");
+        if (changed.Count == 0) return await GetAsync(engagementId, ct);
+
+        ParticipantRow? newReviewer = null;
+        if (changed.Contains("reviewerUserId"))
+        {
+            var users = await directory.LookupAsync([reviewerId], ct);
+            if (!users.TryGetValue(reviewerId, out var user) || user.HomeRole != EngagementRole.Reviewer)
+                throw new ValidationFailedException("reviewerUserId", "The selected user is not a Reviewer.");
+            var participants = await repository.GetParticipantsAsync(engagementId, ct);
+            if (participants.Any(p => p.UserId == reviewerId))
+                throw new ValidationFailedException("reviewerUserId", "The selected user already participates in this engagement.");
+            newReviewer = new ParticipantRow(reviewerId, nameof(EngagementRole.Reviewer), user.DisplayName);
+        }
+
+        var now = clock.GetUtcNow();
+        await using (var uow = await unitOfWork.BeginAsync(ct))
+        {
+            var version = await repository.UpdateDetailsAsync(uow, engagementId, new DetailsUpdate(name, periodType, region, reviewerId), expectedVersion, now, ct);
+            if (version is null)
+            {
+                var current = await repository.GetRowAsync(uow, engagementId, ct);
+                if (current is not null && current.StatusValue != EngagementStatus.Draft)
+                    throw new ForbiddenException("The engagement is no longer a Draft; its details are locked.");
+                throw new ConcurrencyException(current is null ? null : RowVersion.ToToken(current.RowVer));
+            }
+
+            if (newReviewer is not null)
+                await repository.ReplaceReviewerAsync(uow, engagementId, engagement.ReviewerUserId, newReviewer, now, ct);
+
+            await outbox.EnqueueAsync(uow, EventEnvelope<EngagementUpdatedPayload>.Create(
+                EventTypes.EngagementUpdated, engagementId,
+                new EngagementUpdatedPayload(
+                    changed, RowVersion.ToToken(version),
+                    changed.Contains("periodType") ? periodType : null, changed.Contains("region") ? region : null),
+                new EventActor(currentUser.UserId.ToString(), currentUser.Name)), ct);
+            await uow.CommitAsync(ct);
+        }
+
+        return await GetAsync(engagementId, ct);
+    }
+
     public static EventEnvelope<EngagementCreatedPayload> CreatedEvent(NewEngagement e, ConfigurationRequest configuration, bool seeded)
         => EventEnvelope<EngagementCreatedPayload>.Create(
             EventTypes.EngagementCreated, e.EngagementId,

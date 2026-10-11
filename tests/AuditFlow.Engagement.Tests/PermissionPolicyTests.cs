@@ -115,7 +115,7 @@ public class PermissionPolicyTests
     [Fact]
     public void Quick_actions_follow_role_and_status()
     {
-        Assert.Equal([EngagementActions.Open, EngagementActions.Edit], PermissionPolicy.AllowedActionsFor(Auditor, Draft));
+        Assert.Equal([EngagementActions.Open, EngagementActions.Edit, EngagementActions.EditDetails], PermissionPolicy.AllowedActionsFor(Auditor, Draft));
         Assert.Equal([EngagementActions.Open, EngagementActions.Edit, EngagementActions.Submit], PermissionPolicy.AllowedActionsFor(Auditor, InProgress));
         Assert.Equal([EngagementActions.Open, EngagementActions.Review], PermissionPolicy.AllowedActionsFor(Reviewer, UnderReview));
         Assert.Equal([EngagementActions.Open], PermissionPolicy.AllowedActionsFor(Reviewer, Approved));
