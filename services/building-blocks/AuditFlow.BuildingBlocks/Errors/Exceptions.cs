@@ -18,6 +18,9 @@ public sealed class ForbiddenException(string message) : Exception(message);
 
 public sealed class NotFoundException(string message) : Exception(message);
 
+/// <summary>The request conflicts with the current state (e.g. a decision already exists). Maps to 409.</summary>
+public sealed class ConflictException(string message) : Exception(message);
+
 /// <summary>Submission refused because required validations fail. Maps to 422 with the blocking issues listed.</summary>
 public sealed class SubmissionBlockedException(IReadOnlyList<AuditFlow.Contracts.Api.IssueDto> issues, string message)
     : Exception(message)
@@ -42,6 +45,7 @@ public sealed class AuditFlowExceptionHandler(ILogger<AuditFlowExceptionHandler>
         {
             ValidationFailedException v => new ValidationProblemDetails(v.Errors) { Status = 422, Title = "Validation failed" },
             SubmissionBlockedException s => WithIssues(new ProblemDetails { Status = 422, Title = "Submission blocked", Detail = s.Message }, s.Issues),
+            ConflictException cf => new ProblemDetails { Status = 409, Title = "Conflict", Detail = cf.Message },
             ForbiddenException f => new ProblemDetails { Status = 403, Title = "Forbidden", Detail = f.Message },
             NotFoundException n => new ProblemDetails { Status = 404, Title = "Not found", Detail = n.Message },
             ConcurrencyException c => WithVersion(new ProblemDetails { Status = 409, Title = "Conflict", Detail = c.Message }, c.CurrentVersion, c.Resource),
