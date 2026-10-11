@@ -1,0 +1,98 @@
+{
+  "_about": [
+    "Permission matrix for the black-box audit (audit.mjs). It restates docs/architecture/implementation-plan.md section 9 and the REST contract (section 4);",
+    "it is deliberately NOT generated from the backend code, so a regression in the policy shows up as a mismatch. Review it by hand when the rules change.",
+    "Values are the accepted HTTP status codes. A role maps either to one list (same for every status) or to a list per lifecycle status."
+  ],
+
+  "users": {
+    "alice":  { "email": "alice@auditflow.test",  "homeRole": "Auditor" },
+    "bob":    { "email": "bob@auditflow.test",    "homeRole": "CoAuditor" },
+    "rachel": { "email": "rachel@auditflow.test", "homeRole": "Reviewer" },
+    "rohan":  { "email": "rohan@auditflow.test",  "homeRole": "Reviewer" },
+    "victor": { "email": "victor@auditflow.test", "homeRole": "Viewer" }
+  },
+
+  "_roles": "Per-engagement roles used below. 'editor' is Auditor or Co-Auditor (identical rights); 'reviewer' is the assigned reviewer; 'outsider' is a signed-in user who is not a participant (rohan, a reviewer assigned to a different engagement).",
+
+  "statuses": ["Draft", "InProgress", "UnderReview", "Rejected", "Approved"],
+
+  "operations": {
+    "read":         { "request": "GET /engagements/{id}",                             "mutates": false },
+    "participants": { "request": "GET /engagements/{id}/participants",                "mutates": false },
+    "tabs":         { "request": "GET /engagements/{id}/tabs",                        "mutates": false },
+    "tab":          { "request": "GET /engagements/{id}/tabs/1",                      "mutates": false },
+    "validation":   { "request": "GET /engagements/{id}/validation-summary",          "mutates": false },
+    "attachments":  { "request": "GET /engagements/{id}/attachments",                 "mutates": false },
+    "stream":       { "request": "GET /engagements/{id}/events/stream",               "mutates": false },
+    "review":       { "request": "GET /reviews/{id}",                                 "mutates": false },
+    "editDetails":  { "request": "PATCH /engagements/{id}",                           "mutates": true },
+    "edit":         { "request": "PATCH /engagements/{id}/sections/{section}",        "mutates": true },
+    "upload":       { "request": "POST /engagements/{id}/attachments",                "mutates": true },
+    "submit":       { "request": "POST /engagements/{id}/submit",                     "mutates": true },
+    "comment":      { "request": "POST /reviews/{id}/comments",                       "mutates": true },
+    "rejectNoComment": { "request": "POST /reviews/{id}/reject (empty comment)",      "mutates": false },
+    "reject":       { "request": "POST /reviews/{id}/reject",                         "mutates": true },
+    "approve":      { "request": "POST /reviews/{id}/approve",                        "mutates": true }
+  },
+
+  "expect": {
+    "read":         { "editor": [200], "reviewer": [200], "viewer": [200], "outsider": [403, 404] },
+    "participants": { "editor": [200], "reviewer": [200], "viewer": [200], "outsider": [403, 404] },
+    "tabs":         { "editor": [200], "reviewer": [200], "viewer": [200], "outsider": [403, 404] },
+    "tab":          { "editor": [200], "reviewer": [200], "viewer": [200], "outsider": [403, 404] },
+    "validation":   { "editor": [200], "reviewer": [200], "viewer": [200], "outsider": [403, 404] },
+
+    "attachments":  { "editor": [200], "reviewer": [200], "viewer": [403], "outsider": [403, 404] },
+
+    "stream":       { "editor": [200], "reviewer": [200], "viewer": [200], "outsider": [403, 404] },
+
+    "review":       { "editor": [200], "reviewer": [200], "viewer": [403], "outsider": [403, 404] },
+
+    "editDetails": {
+      "editor":   { "Draft": [200], "InProgress": [403], "UnderReview": [403], "Rejected": [403], "Approved": [403] },
+      "reviewer": [403], "viewer": [403], "outsider": [403, 404]
+    },
+    "edit": {
+      "editor":   { "Draft": [200], "InProgress": [200], "UnderReview": [403], "Rejected": [200], "Approved": [403] },
+      "reviewer": [403], "viewer": [403], "outsider": [403, 404]
+    },
+    "upload": {
+      "editor":   { "Draft": [201], "InProgress": [201], "UnderReview": [403], "Rejected": [201], "Approved": [403] },
+      "reviewer": [403], "viewer": [403], "outsider": [403, 404]
+    },
+    "submit": {
+      "editor":   { "Draft": [403], "InProgress": [200, 422], "UnderReview": [403], "Rejected": [403], "Approved": [403] },
+      "reviewer": [403], "viewer": [403], "outsider": [403, 404]
+    },
+
+    "comment": {
+      "editor": [403], "viewer": [403], "outsider": [403, 404],
+      "reviewer": { "Draft": [403], "InProgress": [403], "UnderReview": [201], "Rejected": [403], "Approved": [403] }
+    },
+    "rejectNoComment": {
+      "editor": [403], "viewer": [403], "outsider": [403, 404],
+      "reviewer": { "Draft": [403], "InProgress": [403], "UnderReview": [400], "Rejected": [403], "Approved": [403] }
+    },
+    "reject": {
+      "editor": [403], "viewer": [403], "outsider": [403, 404],
+      "reviewer": { "Draft": [403], "InProgress": [403], "UnderReview": [202], "Rejected": [403], "Approved": [403] }
+    },
+    "approve": {
+      "editor": [403], "viewer": [403], "outsider": [403, 404],
+      "reviewer": { "Draft": [403], "InProgress": [403], "UnderReview": [202], "Rejected": [403], "Approved": [403] }
+    }
+  },
+
+  "global": {
+    "_about": "Checks that do not depend on an engagement's status.",
+    "createEngagement": { "alice": [201], "bob": [201], "rachel": [403], "rohan": [403], "victor": [403] },
+    "me":               { "alice": [200], "bob": [200], "rachel": [200], "rohan": [200], "victor": [200] },
+    "permissions":      { "alice": [200], "bob": [200], "rachel": [200], "rohan": [200], "victor": [200] },
+    "list":             { "alice": [200], "bob": [200], "rachel": [200], "rohan": [200], "victor": [200] },
+    "noToken":          [401],
+    "badToken":         [401],
+    "unknownEngagement": [403, 404],
+    "internalViaGateway": [404]
+  }
+}
