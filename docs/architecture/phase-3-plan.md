@@ -153,7 +153,7 @@ Endpoints (all through the gateway; `/reviews/{engagementId}` per the PRD):
 | SSE: `ready` not mentioned | `ready` frame (with the current position) on a fresh connection | closes the gap between the first fetch and the stream opening |
 | Heartbeat 15 s, `reauth` on expiry | as planned; `Last-Event-ID` is also accepted as `?lastEventId=` | fetch clients can send either |
 | Replay "purged" case | not built (the log is never purged); a client ahead of the log gets `resync` | nothing deletes rows in the POC |
-| Dashboard: refetch on navigation only | dashboard also refetches when a status event arrives for an engagement the user has open (shared `['engagements']` key) | free with the stream hook; no per-row streams |
+| Dashboard: refetch on navigation only | as planned; additionally the stream on an open engagement marks the dashboard list stale, so it is fresh on return | free with the stream hook; no per-row streams |
 | Gateway SSE test "early" | verified against the Docker stack through the gateway (Alice and Victor streams, live comment / reject / status events, Viewer filtering) | done before the UI work |
 | Playwright / UI run | the UI is type-checked and built, not exercised in a browser | you verify the UI yourself |
 
