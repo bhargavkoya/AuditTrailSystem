@@ -3,6 +3,7 @@ using System.Text.Json;
 using AuditFlow.BuildingBlocks.Correlation;
 using AuditFlow.BuildingBlocks.Data;
 using AuditFlow.BuildingBlocks.Eventing;
+using AuditFlow.BuildingBlocks.Telemetry;
 using Azure.Messaging.ServiceBus;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
@@ -108,15 +109,27 @@ public sealed class EventDispatcher(
         await using var uow = await uowFactory.BeginAsync(cancellationToken);
         if (!await store.TryMarkAsync(consumerName, messageId, uow, cancellationToken))
         {
+            AuditFlowMetrics.RecordDuplicate(eventType);
             logger.LogInformation("Skipping duplicate {EventType} {MessageId} for {Consumer}", eventType, messageId, consumerName);
             return false;
         }
 
-        await using var scope = scopes.CreateAsyncScope();
-        foreach (var registration in registrations)
-            await registration.Invoke(scope.ServiceProvider, json, uow, cancellationToken);
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            foreach (var registration in registrations)
+                await registration.Invoke(scope.ServiceProvider, json, uow, cancellationToken);
 
-        await uow.CommitAsync(cancellationToken);
+            await uow.CommitAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            AuditFlowMetrics.RecordFailed(eventType);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
+        }
+
+        AuditFlowMetrics.RecordConsumed(eventType);
         return true;
     }
 }

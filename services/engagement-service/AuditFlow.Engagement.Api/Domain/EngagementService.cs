@@ -2,6 +2,7 @@ using AuditFlow.BuildingBlocks.Data;
 using AuditFlow.BuildingBlocks.Errors;
 using AuditFlow.BuildingBlocks.Eventing;
 using AuditFlow.BuildingBlocks.Messaging;
+using AuditFlow.BuildingBlocks.Telemetry;
 using AuditFlow.BuildingBlocks.Security;
 using AuditFlow.BuildingBlocks.Versioning;
 using AuditFlow.Contracts.Api;
@@ -172,6 +173,7 @@ public sealed class EngagementService(
                 EventTypes.EngagementStatusChanged, engagementId,
                 new EngagementStatusChangedPayload(EngagementStatus.InProgress, EngagementStatus.UnderReview, nameof(Trigger.Submit), version), actor), ct);
             await uow.CommitAsync(ct);
+            AuditFlowMetrics.RecordTransition(nameof(EngagementStatus.InProgress), nameof(EngagementStatus.UnderReview));
         }
 
         return await GetAsync(engagementId, ct);

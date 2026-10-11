@@ -111,7 +111,7 @@ public class EventDispatcherTests
     [Fact]
     public async Task Consume_span_is_a_child_of_the_publishing_span_when_traceparent_is_present()
     {
-        var started = new List<Activity>();
+        var started = new System.Collections.Concurrent.ConcurrentQueue<Activity>();
         using var listener = NewListener(started);
         var f = new Fixture();
         var id = Guid.NewGuid();
@@ -131,7 +131,7 @@ public class EventDispatcherTests
     [InlineData("garbage")]
     public async Task Consume_span_starts_a_new_trace_when_traceparent_is_absent_or_invalid(string? traceParent)
     {
-        var started = new List<Activity>();
+        var started = new System.Collections.Concurrent.ConcurrentQueue<Activity>();
         using var listener = NewListener(started);
         var f = new Fixture();
         var id = Guid.NewGuid();
@@ -144,13 +144,13 @@ public class EventDispatcherTests
         Assert.Equal(default, consume.ParentSpanId);
     }
 
-    private static ActivityListener NewListener(List<Activity> started)
+    private static ActivityListener NewListener(System.Collections.Concurrent.ConcurrentQueue<Activity> started)
     {
         var listener = new ActivityListener
         {
             ShouldListenTo = s => s.Name == "AuditFlow.Messaging",
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStarted = started.Add
+            ActivityStarted = started.Enqueue
         };
         ActivitySource.AddActivityListener(listener);
         return listener;

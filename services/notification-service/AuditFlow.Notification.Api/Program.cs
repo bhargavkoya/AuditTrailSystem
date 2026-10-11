@@ -28,6 +28,7 @@ builder.Services.AddSingleton<SseSession>();
 builder.Services.AddHostedService<EventLogTailer>();
 
 var app = builder.Build();
+app.Services.GetRequiredService<EventHub>().RegisterMetrics();
 app.UseAuditFlowDefaults();
 app.MapStreamEndpoints();
 app.Run();

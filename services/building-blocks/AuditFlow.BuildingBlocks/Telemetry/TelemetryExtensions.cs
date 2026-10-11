@@ -36,7 +36,9 @@ public static class TelemetryExtensions
             })
             .WithMetrics(m =>
             {
-                m.AddAspNetCoreInstrumentation().AddHttpClientInstrumentation();
+                // "System.Runtime" is the built-in .NET 8 meter (thread-pool queue length, GC) used by the load test.
+                m.AddMeter(AuditFlowMetrics.MeterName, "System.Runtime")
+                 .AddAspNetCoreInstrumentation().AddHttpClientInstrumentation();
 
                 if (!string.IsNullOrWhiteSpace(appInsights)) m.AddAzureMonitorMetricExporter(o => o.ConnectionString = appInsights);
                 else if (!string.IsNullOrWhiteSpace(otlp)) m.AddOtlpExporter();

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using AuditFlow.BuildingBlocks.Data;
 using AuditFlow.BuildingBlocks.Eventing;
+using AuditFlow.BuildingBlocks.Telemetry;
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -126,6 +127,7 @@ public sealed class OutboxDispatcher(
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 var backoff = TimeSpan.FromSeconds(Math.Min(MaxBackoffSeconds, Math.Pow(2, Math.Min(row.Attempts, 10))));
+                AuditFlowMetrics.OutboxPublishFailures.Add(1);
                 logger.LogWarning("Publishing outbox message {Id} failed (attempt {Attempt}); retrying in {Backoff}s: {Error}",
                     row.Id, row.Attempts + 1, backoff.TotalSeconds, ex.Message);
                 await uow.ExecuteAsync(
@@ -135,6 +137,8 @@ public sealed class OutboxDispatcher(
             }
         }
 
+        AuditFlowMetrics.SetOutboxPending(await uow.QuerySingleOrDefaultAsync<int>(
+            "SELECT COUNT(*) FROM dbo.OutboxMessage WHERE PublishedAt IS NULL", null, ct));
         await uow.CommitAsync(ct);
         return published;
     }

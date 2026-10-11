@@ -129,6 +129,7 @@ public static class ServiceDefaultsExtensions
             app.UseAuthentication();
             app.UseAuthorization();
         }
+        app.UseMiddleware<RequestSpanTagsMiddleware>();
 
         app.MapGet("/", () => Results.Ok(new { service, docs = "/swagger", health = "/health" })).ExcludeFromDescription();
         app.MapHealthChecks("/health", new HealthCheckOptions

@@ -1,3 +1,4 @@
+using AuditFlow.BuildingBlocks.Telemetry;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -53,6 +54,10 @@ public sealed class AuditFlowExceptionHandler(ILogger<AuditFlowExceptionHandler>
             HttpRequestException => new ProblemDetails { Status = 502, Title = "A dependent service is unavailable" },
             _ => null
         };
+
+        if (exception is ConcurrencyException conflict) AuditFlowMetrics.RecordConflict(conflict.Resource);
+        else if (exception is ConflictException) AuditFlowMetrics.RecordConflict("decision");
+        else if (exception is SubmissionBlockedException) AuditFlowMetrics.BlockedSubmits.Add(1);
 
         if (problem is null)
         {

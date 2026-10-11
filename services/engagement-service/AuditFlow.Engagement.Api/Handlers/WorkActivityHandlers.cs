@@ -1,6 +1,7 @@
 using AuditFlow.BuildingBlocks.Data;
 using AuditFlow.BuildingBlocks.Eventing;
 using AuditFlow.BuildingBlocks.Messaging;
+using AuditFlow.BuildingBlocks.Telemetry;
 using AuditFlow.BuildingBlocks.Versioning;
 using AuditFlow.Contracts.Api;
 using AuditFlow.Contracts.Events;
@@ -63,6 +64,7 @@ public sealed class WorkActivityHandler(
             EventTypes.EngagementStatusChanged, engagement.EngagementId,
             new EngagementStatusChangedPayload(engagement.StatusValue, decision.To.Value, trigger.ToString(), RowVersion.ToToken(version)),
             actor), ct);
+        AuditFlowMetrics.RecordTransition(engagement.StatusValue.ToString(), decision.To.Value.ToString());
         return true;
     }
 }

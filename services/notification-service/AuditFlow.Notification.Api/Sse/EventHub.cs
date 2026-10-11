@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using AuditFlow.BuildingBlocks.Telemetry;
 using AuditFlow.Contracts.Api;
 using AuditFlow.Contracts.Events;
 
@@ -73,6 +74,8 @@ public sealed class EventHub(Microsoft.Extensions.Options.IOptions<SseOptions> o
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<SseSubscription, byte>> subscribers = new();
 
     public int SubscriberCount => subscribers.Values.Sum(s => s.Count);
+
+    public void RegisterMetrics() => AuditFlowMetrics.RegisterSseConnections(() => SubscriberCount);
 
     public SseSubscription Subscribe(string engagementId)
     {

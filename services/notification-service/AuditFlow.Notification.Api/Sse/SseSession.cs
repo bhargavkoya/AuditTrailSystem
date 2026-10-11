@@ -1,4 +1,5 @@
 using System.Text;
+using AuditFlow.BuildingBlocks.Telemetry;
 using AuditFlow.Notification.Api.Data;
 using Microsoft.Extensions.Options;
 
@@ -37,6 +38,7 @@ public sealed class SseSession(EventHub hub, IEventLogReader log, IOptions<SseOp
                 : await log.ReadAfterAsync(engagementId, lastEventId.Value, o.ReplayCap + 1, ct);
             if (replay is null || replay.Count > o.ReplayCap)
             {
+                AuditFlowMetrics.SseDropped.Add(1);
                 await WriteAsync(output, ControlFrame("resync", max), ct);
             }
             else
@@ -59,6 +61,7 @@ public sealed class SseSession(EventHub hub, IEventLogReader log, IOptions<SseOp
             }
             if (subscription.Overflowed)
             {
+                AuditFlowMetrics.SseDropped.Add(1);
                 await WriteAsync(output, ControlFrame("resync", await log.MaxSeqAsync(ct)), ct);
                 return;
             }
