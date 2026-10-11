@@ -1,7 +1,7 @@
 # Phase 2: Workflow Core (FR-4, FR-5, FR-6, FR-8, FR-12): detailed plan
 
-Status: **proposed, awaiting approval.** Builds on `implementation-plan.md` and the delivered Phase 1 (`phase-1-plan.md` section 8).
-No Phase 2 code is written yet. Branch: `feature/phase-2-workflow-core` (from `main` after pulling latest).
+Status: **delivered** (see section 9 for what changed during the build). Builds on `implementation-plan.md` and the delivered Phase 1 (`phase-1-plan.md` section 8).
+Branch: `feature/phase-2-workflow-core`.
 
 ## 1. Goal and demo
 
@@ -197,3 +197,24 @@ Routes: workflow (`/engagements/{id}/tabs/**`, `/sections/**`, `/validation-summ
 8. **Attachments:** 10 MB, any type, local volume.
 9. **Extras beyond the PRD list:** internal endpoints (`submission-readiness`, section policy) and the `editDetails` action.
 10. **Git flow:** commits per step on `feature/phase-2-workflow-core`; push and PR when you say.
+
+## 9. Delivered: deviations from this plan
+
+The ten decisions in section 8 were accepted with their defaults. While building, these things differed from the text above:
+
+| Plan | Built | Why |
+|---|---|---|
+| `WorkflowTabs` table | none; tabs come from the rule set | five static rows per engagement carried no information |
+| `EngagementConfigurations.ConfigTypes/Options` json | `PeriodType`, `Region`, `RuleSetVersion`, `RowVer` only | Tab 1 fields are the single source of the configuration |
+| `ValidationIssues`, `ReconciliationSummaries` tables | not stored; evaluated on every read and save (ADR 0005); `ValidationSummaries` keeps only the counts and hash | no stale rows, less code; the engine is pure and cheap |
+| (not planned) per-engagement lock | `UPDLOCK, HOLDLOCK` on the engagement configuration row for every write transaction (ADR 0006) | the whole-engagement recompute needs a stable snapshot |
+| (not planned) `Recomputer` | shared by saves and by the `AttachmentAdded` / `EngagementUpdated` consumers | one place persists visibility, the configuration version and the summary |
+| Tab 1 provisioning mapping | a `source` property on Tab 1 fields (`config:Equities`, `option:includeReconciliation`) | keeps the mapping in the rule set |
+| `409` body | adds `resource` (the conflicting section) next to `currentVersion` | a tab save touches several sections |
+| Polly retry on internal calls | 5 s timeout, no retry | not worth a dependency for the POC |
+| Seeded attachments | attachment-service consumes `EngagementCreated` (seeded) and attaches sample files; its subscription gained that rule | late-stage seeded engagements validate cleanly through the real event path |
+| Playwright / UI run | the UI is type-checked and built, not exercised in a browser | you verify the UI yourself |
+
+Known gaps (accepted for the POC): the validation summary still lists "attachment required" messages for Viewers (no file names or
+content, but the existence of a requirement); a crash between writing a file and committing its row can leave an orphan file;
+`EngagementUpdated` arriving before provisioning is retried by the broker rather than buffered.
