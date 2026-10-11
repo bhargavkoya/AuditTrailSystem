@@ -59,6 +59,8 @@ public static class PermissionPolicy
         if (CanEditDetails(role, status)) actions.Add(EngagementActions.EditDetails);
         if (capabilities.Contains(Capabilities.Submit)) actions.Add(EngagementActions.Submit);
         if (capabilities.Contains(Capabilities.Review)) actions.Add(EngagementActions.Review);
+        else if (role != EngagementRole.Viewer && status is EngagementStatus.UnderReview or EngagementStatus.Approved or EngagementStatus.Rejected)
+            actions.Add(EngagementActions.ViewReview);
 
         return actions;
     }

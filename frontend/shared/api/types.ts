@@ -222,3 +222,63 @@ export interface UpdateEngagementRequest {
   region?: string
   reviewerUserId?: string
 }
+
+// ---- Review and real time (Phase 3) ----
+
+export interface TabComment {
+  commentId: string
+  tabNo: number
+  cycle: number
+  authorUserId: string
+  authorName: string
+  body: string
+  createdAt: string
+}
+
+export interface ReviewDecision {
+  decisionId: string
+  cycle: number
+  decision: 'Approved' | 'Rejected'
+  reviewerUserId: string
+  reviewerName: string
+  comment: string | null
+  decidedAt: string
+}
+
+/** `available` is false when workflow-service could not serve this tab; the screen degrades instead of failing. */
+export interface ReviewTab {
+  tabNo: number
+  title: string
+  available: boolean
+  content: TabView | null
+}
+
+/** Everything the review screen renders. canComment / canDecide are decided by the backend. */
+export interface ReviewView {
+  engagement: EngagementDetail
+  cycle: number
+  canComment: boolean
+  canDecide: boolean
+  tabs: ReviewTab[]
+  validation: ValidationSummary | null
+  comments: TabComment[]
+  history: ReviewDecision[]
+}
+
+export interface DecisionResult {
+  decisionId: string
+  cycle: number
+  decision: 'Approved' | 'Rejected'
+}
+
+/** SSE frame data. Carries ids, names and versions only, never field values. */
+export interface StreamEnvelope {
+  eventId: string
+  eventType: string
+  schemaVersion: number
+  engagementId: string
+  occurredAt: string
+  correlationId: string
+  actor: { userId: string; name: string | null } | null
+  payload: Record<string, unknown>
+}
