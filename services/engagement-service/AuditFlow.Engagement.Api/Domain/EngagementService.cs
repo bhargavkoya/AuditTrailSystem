@@ -19,7 +19,8 @@ public sealed class EngagementService(
     IOutbox outbox,
     IOptions<CreationCatalogue> catalogue,
     ICurrentUser currentUser,
-    TimeProvider clock)
+    TimeProvider clock,
+    IWorkflowReadinessClient readiness)
 {
     public CreationOptionsDto GetCreationOptions() => catalogue.Value.ToDto();
 
@@ -124,6 +125,52 @@ public sealed class EngagementService(
                     changed, RowVersion.ToToken(version),
                     changed.Contains("periodType") ? periodType : null, changed.Contains("region") ? region : null),
                 new EventActor(currentUser.UserId.ToString(), currentUser.Name)), ct);
+            await uow.CommitAsync(ct);
+        }
+
+        return await GetAsync(engagementId, ct);
+    }
+
+    /// <summary>
+    /// InProgress -> Under Review. Permission and legal-state checks come from the state machine; the workflow-service
+    /// decides readiness (zero blocking errors). <paramref name="ifMatch"/> is optional: ordinary saves touch the engagement's
+    /// activity time, so a strict version check would reject most submits. The guard is <c>WHERE Status = 'InProgress'</c>.
+    /// </summary>
+    public async Task<EngagementDetailDto> SubmitAsync(string engagementId, string? ifMatch, CancellationToken ct)
+    {
+        var (engagement, role) = await LoadAsync(engagementId, ct);
+        var expectedVersion = string.IsNullOrWhiteSpace(ifMatch) ? null : RowVersion.FromToken(ifMatch);
+
+        // Who/what first (403), then readiness (422).
+        var permitted = EngagementStateMachine.Evaluate(engagement.StatusValue, Trigger.Submit, new TransitionContext(role, ValidationPassed: true));
+        if (!permitted.Allowed) throw new ForbiddenException(permitted.Reason!);
+
+        var readinessResult = await readiness.GetReadinessAsync(engagementId, ct);
+        var decision = EngagementStateMachine.Evaluate(
+            engagement.StatusValue, Trigger.Submit, new TransitionContext(role, ValidationPassed: readinessResult.ReadyToSubmit));
+        if (!decision.Allowed)
+            throw new SubmissionBlockedException(readinessResult.Errors, decision.Reason!);
+
+        var now = clock.GetUtcNow();
+        await using (var uow = await unitOfWork.BeginAsync(ct))
+        {
+            var outcome = await repository.SubmitAsync(uow, engagementId, expectedVersion, now, ct);
+            if (outcome is null)
+            {
+                var current = await repository.GetRowAsync(uow, engagementId, ct);
+                if (current is not null && current.StatusValue != EngagementStatus.InProgress)
+                    throw new ForbiddenException($"The engagement is {current.StatusValue} and can no longer be submitted.");
+                throw new ConcurrencyException(current is null ? null : RowVersion.ToToken(current.RowVer));
+            }
+
+            var actor = new EventActor(currentUser.UserId.ToString(), currentUser.Name);
+            var version = RowVersion.ToToken(outcome.RowVer);
+            await outbox.EnqueueAsync(uow, EventEnvelope<EngagementSubmittedPayload>.Create(
+                EventTypes.EngagementSubmitted, engagementId,
+                new EngagementSubmittedPayload(currentUser.UserId, currentUser.Name, outcome.SubmissionCount), actor), ct);
+            await outbox.EnqueueAsync(uow, EventEnvelope<EngagementStatusChangedPayload>.Create(
+                EventTypes.EngagementStatusChanged, engagementId,
+                new EngagementStatusChangedPayload(EngagementStatus.InProgress, EngagementStatus.UnderReview, nameof(Trigger.Submit), version), actor), ct);
             await uow.CommitAsync(ct);
         }
 

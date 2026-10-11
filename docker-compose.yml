@@ -116,6 +116,7 @@ services:
     environment:
       <<: *service-env
       ConnectionStrings__Default: "Server=sqlserver,1433;Database=AuditFlow_Review;User Id=sa;Password=${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026};TrustServerCertificate=True;Connect Timeout=5"
+      ServiceBus__SubscriptionName: review
     ports: ["5005:8080"]
     depends_on: *service-deps
 
@@ -126,7 +127,6 @@ services:
       <<: *service-env
       ConnectionStrings__Default: "Server=sqlserver,1433;Database=AuditFlow_Notification;User Id=sa;Password=${MSSQL_SA_PASSWORD:-AuditFlow_Dev#2026};TrustServerCertificate=True;Connect Timeout=5"
       ServiceBus__SubscriptionName: notification
-      AuditFlow__DevEndpoints__Enabled: "true"   # dev-only events endpoint, removed in Phase 3
     ports: ["5006:8080"]
     depends_on: *service-deps
 

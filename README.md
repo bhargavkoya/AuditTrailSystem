@@ -1,7 +1,7 @@
 # AuditFlow (POC)
 
 Backend-controlled audit engagement management platform: a demoable microservices skeleton.
-Spec: [docs/PRD.md](docs/PRD.md) | Plans: [implementation](docs/architecture/implementation-plan.md), [Phase 1](docs/architecture/phase-1-plan.md), [Phase 2](docs/architecture/phase-2-plan.md) |
+Spec: [docs/PRD.md](docs/PRD.md) | Plans: [implementation](docs/architecture/implementation-plan.md), [Phase 1](docs/architecture/phase-1-plan.md), [Phase 2](docs/architecture/phase-2-plan.md), [Phase 3](docs/architecture/phase-3-plan.md) |
 Decisions: [docs/decisions](docs/decisions) | API: [docs/api](docs/api/README.md) | Events: [contracts/events](contracts/events/README.md) |
 Conventions: [CLAUDE.md](CLAUDE.md)
 
@@ -12,7 +12,10 @@ Conventions: [CLAUDE.md](CLAUDE.md)
 - **Phase 2** (workflow core): five tabs driven by a JSON rule set (Tab 1 shows or hides sections and changes what is required),
   validation banners (Error / Warning / Information), attachments at section / tab / engagement level (latest file only),
   reconciliation variances, optimistic concurrency (409), event-driven Draft / Rework -> In Progress.
-- Next: Phase 3 (submit, review, SSE), Phase 4 (hardening).
+- **Phase 3** (review and real time): submit with a backend readiness check, the separate review screen (tab comments, approve, reject with a
+  mandatory comment, decision history per review cycle), the full state machine, and SSE live updates with replay, role-filtered events and
+  conflict-aware reconciliation in the UI.
+- Next: Phase 4 (hardening: App Insights, 409 UX polish, permission audit, load check, CI).
 
 ## Prerequisites
 .NET 8 SDK (`global.json` pins 8.0.x), Docker Desktop, Node 20+.
@@ -47,8 +50,18 @@ Sign in at http://localhost:5173 with a demo user (password `Passw0rd!`):
 6. As Victor (Viewer): read-only, no attachments. As Rachel (Reviewer): read-only. **ENG-1003** (Under Review) is locked for Alice.
 7. The first edit on **ENG-1001** (Draft) turns it *In Progress* a moment later (event-driven); editing **ENG-1005** (Rejected) reopens it.
 
-Create an engagement (it appears with "Setting up the workflow..." for a second), then watch the event arrive: `GET http://localhost:5006/dev/events/recent` (use a token from
-`POST /auth/login`), or open the Swagger pages (`http://localhost:5001/swagger` ... `5006`).
+**Phase 3 walkthrough** (review and live updates; use two browser profiles):
+1. As Alice open **ENG-1002** and press *Submit for review*: the backend refuses with the blocking errors listed. The engagement stays *In Progress*.
+2. Open **ENG-1003** (Under Review, reviewer Rachel) as Bob in one profile and as Rachel in another. Rachel: *Go to review screen* (own colour scheme, read-only tabs, validation summary, decision history).
+3. Rachel adds a comment on Tab 2; press *Reject* without text: the server answers 400 and the message is shown. Add a comment and reject: the status becomes *Rejected* on both screens without reloading.
+4. Bob edits any field on ENG-1003: it returns to *In Progress*. In Alice's profile (also on ENG-1003) the page shows *"Bob changed ..."* when she has unsaved edits in that section, otherwise it refreshes only that section. Watch the **Live** dot in the header.
+5. Bob presses *Submit for review* (cycle 2). Rachel approves: *Approved*, everything read-only, history shows both cycles. Alice and Bob get *View review* to read the feedback.
+6. As Victor (Viewer): tabs and validation only. No attachment or comment UI, no review screen (403), and his stream never carries `AttachmentAdded` / `ReviewerCommentAdded`.
+7. Raw stream: `curl -N -H "Authorization: Bearer <token>" http://localhost:5000/engagements/ENG-1003/events/stream` (add `-H "Last-Event-ID: 5"` to replay).
+
+After pulling Phase 3 into an existing environment run `./infra/local/down.ps1 -Volumes` once: the review database and the broker subscriptions are new, and the review history for the seeded engagements is created from the seeded events.
+
+Create an engagement (it appears with "Setting up the workflow..." for a second), or open the Swagger pages (`http://localhost:5001/swagger` ... `5006`).
 
 ## Ports
 | Component | Port |
@@ -78,7 +91,9 @@ validation at field / section / tab level, reconciliation thresholds, value pars
 Integration tests (`Category=Integration`) start a SQL Server container with Testcontainers and cover outbox atomicity, ordering and
 backoff, duplicate delivery, rollback, the engagement queries, workflow provisioning (idempotent), section saves with 409 and parallel
 writers, atomic tab saves, Tab 1 driven visibility with events, the workflow consumers, attachment replace / permissions / validation,
-and the engagement status transitions.
+and the engagement status transitions. Phase 3 adds submit (422 / 403 / double submit), review-service (comments, decisions, composed
+screen, degraded tabs, seed history), decisions applied from events, the full submit-reject-rework-approve lifecycle across two databases, and
+the SSE hub, tailer and session (replay, resync, reauth, heartbeat, Viewer filtering) in `AuditFlow.Notification.Tests`.
 
 ## Telemetry
 OpenTelemetry in every service. `APPLICATIONINSIGHTS_CONNECTION_STRING` -> Application Insights; `OTEL_EXPORTER_OTLP_ENDPOINT` -> OTLP;

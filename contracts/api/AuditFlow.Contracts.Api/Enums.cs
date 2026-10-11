@@ -45,6 +45,8 @@ public static class EngagementActions
     public const string Edit = "edit";
     public const string Submit = "submit";
     public const string Review = "review";
+    /// <summary>Open the review screen read-only (feedback and history). Not offered to Viewers.</summary>
+    public const string ViewReview = "viewReview";
     /// <summary>Edit name / period / region / reviewer. Offered by the backend in Draft only.</summary>
     public const string EditDetails = "editDetails";
 }

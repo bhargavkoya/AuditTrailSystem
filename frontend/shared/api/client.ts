@@ -1,3 +1,5 @@
+import type { Issue } from './types'
+
 /** ProblemDetails returned by the backend (RFC 7807). `errors` is present for 422 validation failures. */
 export interface Problem {
   title?: string
@@ -8,6 +10,8 @@ export interface Problem {
   /** 409 only: the version currently stored, and (for multi-section saves) which resource conflicted. */
   currentVersion?: string
   resource?: string
+  /** 422 on submit: the blocking validation issues that prevent submission. */
+  issues?: Issue[]
 }
 
 export class ApiError extends Error {
@@ -87,4 +91,9 @@ export async function downloadFile(path: string, fileName: string): Promise<void
   link.click()
   link.remove()
   URL.revokeObjectURL(url)
+}
+
+/** For the SSE client, which cannot go through `api()` because it streams. */
+export function getAccessToken(): string | null {
+  return tokenProvider()
 }

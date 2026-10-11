@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError } from '@shared/api/client'
 import type { Issue } from '@shared/api/types'
+import { useEngagementStream, type ExternalChange } from '@shared/stream/useEngagementStream'
 import { StatusBadge, roleLabel } from '@shared/ui/labels'
 import { useAttachments, useEngagement, useParticipants, useTabs, useValidationSummary } from './api'
 import { AttachmentPanel } from './AttachmentPanel'
 import { EditDetailsDialog } from './EditDetailsDialog'
+import { SubmitBar } from './SubmitBar'
 import { TabNav } from './TabNav'
 import { TabView, type Drafts, type FocusTarget } from './TabView'
 import { ValidationBanners } from './ValidationBanners'
@@ -24,6 +27,8 @@ export function EngagementPage() {
   const [drafts, setDrafts] = useState<Record<number, Drafts>>({})
   const [focus, setFocus] = useState<FocusTarget | null>(null)
   const [editing, setEditing] = useState(false)
+  const [external, setExternal] = useState<ExternalChange[]>([])
+  const queryClient = useQueryClient()
 
   const engagement = useEngagement(id)
   const tabs = useTabs(id, engagement.isSuccess)
@@ -32,6 +37,27 @@ export function EngagementPage() {
   const canViewAttachments = engagement.data?.capabilities.includes(CAP_ATTACH_VIEW) ?? false
   const attachments = useAttachments(id, ready && canViewAttachments)
   const participants = useParticipants(id, engagement.isSuccess)
+
+  // Live updates: other users' changes arrive as events and are reconciled against what this page already shows.
+  const draftsRef = useRef(drafts)
+  draftsRef.current = drafts
+  const live = useEngagementStream(id, {
+    hasDraft: (tabNo, sectionKey) => {
+      const tabDrafts = draftsRef.current[tabNo] ?? {}
+      return sectionKey ? Object.keys(tabDrafts[sectionKey] ?? {}).length > 0 : Object.values(tabDrafts).some((fields) => Object.keys(fields).length > 0)
+    },
+    onExternalChange: (change) => setExternal((all) => (all.some((c) => c.tabNo === change.tabNo && c.sectionKey === change.sectionKey) ? all : [...all, change])),
+  })
+
+  function reloadExternal(change: ExternalChange) {
+    setDrafts((all) => {
+      const tabDrafts = { ...(all[change.tabNo] ?? {}) }
+      if (change.sectionKey) delete tabDrafts[change.sectionKey]
+      return { ...all, [change.tabNo]: change.sectionKey ? tabDrafts : {} }
+    })
+    setExternal((all) => all.filter((c) => c.id !== change.id))
+    void queryClient.invalidateQueries({ queryKey: ['tab', id, change.tabNo] })
+  }
 
   const selected = Number(search.get('tab')) || 1
   const unsaved = useMemo(
@@ -78,6 +104,14 @@ export function EngagementPage() {
         <h1 className="text-2xl font-semibold">{e.name}</h1>
         <StatusBadge status={e.status} />
         <span className="rounded border px-2 py-0.5 text-xs">My role: {roleLabel[e.myRole]}</span>
+        <span
+          role="status"
+          title={live === 'live' ? 'Receiving live updates' : live === 'connecting' ? 'Connecting to live updates…' : 'Live updates are off; reload to reconnect'}
+          className={`flex items-center gap-1 text-xs ${live === 'live' ? 'text-emerald-700' : 'text-slate-400'}`}
+        >
+          <span className={`h-2 w-2 rounded-full ${live === 'live' ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+          {live === 'live' ? 'Live' : live === 'connecting' ? 'Connecting…' : 'Offline'}
+        </span>
         {e.allowedActions.includes('editDetails') && (
           <button type="button" onClick={() => setEditing(true)} className="rounded border px-3 py-1 text-xs font-medium hover:bg-slate-100">
             Edit details
@@ -86,6 +120,11 @@ export function EngagementPage() {
         {e.allowedActions.includes('review') && (
           <Link to={`/engagements/${e.engagementId}/review`} className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600">
             Go to review screen
+          </Link>
+        )}
+        {e.allowedActions.includes('viewReview') && (
+          <Link to={`/engagements/${e.engagementId}/review`} className="rounded border border-amber-400 px-3 py-1 text-xs font-medium text-amber-800 hover:bg-amber-50">
+            View review
           </Link>
         )}
       </div>
@@ -101,8 +140,29 @@ export function EngagementPage() {
         </p>
       )}
 
+      {external.length > 0 && (
+        <div className="mt-4 space-y-2">
+          {external.map((change) => (
+            <div key={change.id} role="alert" className="flex flex-wrap items-center gap-3 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <span>
+                <strong>{change.by}</strong> changed {change.sectionKey ? 'a section you are editing' : 'the configuration while you have unsaved edits on that tab'}.
+                Saving your edits now will report a conflict.
+              </span>
+              <button type="button" className="rounded border border-amber-400 bg-white px-3 py-1 text-xs font-medium hover:bg-amber-100" onClick={() => reloadExternal(change)}>
+                Reload (discard my edits)
+              </button>
+              <button type="button" className="text-xs underline" onClick={() => setExternal((all) => all.filter((c) => c.id !== change.id))}>
+                Keep my edits
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {ready && (
         <div className="mt-5 space-y-5">
+          <SubmitBar engagement={e} summary={summary.data} hasUnsavedEdits={unsaved.size > 0} />
+
           {summary.data && (
             <>
               <p className="text-sm">

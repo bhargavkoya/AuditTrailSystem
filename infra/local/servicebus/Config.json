@@ -49,6 +49,7 @@
                 "Name": "review",
                 "Properties": { "DeadLetteringOnMessageExpiration": false, "DefaultMessageTimeToLive": "PT1H", "LockDuration": "PT1M", "MaxDeliveryCount": 5, "RequiresSession": false },
                 "Rules": [
+                  { "Name": "EngagementCreated", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "EngagementCreated" } } },
                   { "Name": "EngagementSubmitted", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "EngagementSubmitted" } } },
                   { "Name": "EngagementStatusChanged", "Properties": { "FilterType": "Correlation", "CorrelationFilter": { "Label": "EngagementStatusChanged" } } }
                 ]

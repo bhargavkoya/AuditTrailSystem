@@ -8,6 +8,7 @@ const ACTIONS: Record<string, { label: string; to: (id: string) => string }> = {
   review: { label: 'Review', to: (id) => `/engagements/${id}/review` },
   edit: { label: 'Open', to: (id) => `/engagements/${id}` },
   open: { label: 'View', to: (id) => `/engagements/${id}` },
+  viewReview: { label: 'Feedback', to: (id) => `/engagements/${id}/review` },
 }
 
 function primaryAction(actions: string[]) {
@@ -43,6 +44,12 @@ export function EngagementTable({ items }: { items: EngagementSummary[] }) {
                 <td className="px-4 py-3 whitespace-nowrap text-slate-500">{new Date(e.lastUpdatedAt).toLocaleString()}</td>
                 <td className="px-4 py-3">{roleLabel[e.myRole]}</td>
                 <td className="px-4 py-3 text-right">
+                  <span className="inline-flex gap-2">
+                  {e.allowedActions.includes('viewReview') && (
+                    <Link to={ACTIONS.viewReview.to(e.engagementId)} className="rounded border border-amber-400 px-3 py-1 text-xs font-medium text-amber-800 hover:bg-amber-50">
+                      {ACTIONS.viewReview.label}
+                    </Link>
+                  )}
                   {action && (
                     <Link
                       to={ACTIONS[action].to(e.engagementId)}
@@ -51,6 +58,7 @@ export function EngagementTable({ items }: { items: EngagementSummary[] }) {
                       {ACTIONS[action].label}
                     </Link>
                   )}
+                  </span>
                 </td>
               </tr>
             )

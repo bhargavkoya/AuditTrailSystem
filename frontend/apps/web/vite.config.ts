@@ -20,6 +20,7 @@ export default defineConfig({
     proxy: {
       '/health': gateway,
       '/auth': gateway,
+      '/reviews': gateway,
       '/engagements': { target: gateway, bypass: (req) => (req.headers.accept?.includes('text/html') ? '/index.html' : undefined) },
     },
   },

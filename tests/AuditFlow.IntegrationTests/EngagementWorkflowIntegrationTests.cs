@@ -28,7 +28,7 @@ public class EngagementWorkflowIntegrationTests(SqlServerFixture sql)
         public required TestDatabase Db { get; init; }
         public required EngagementRepository Repository { get; init; }
 
-        public EngagementService ServiceFor(DemoUser user)
+        public EngagementService ServiceFor(DemoUser user, SubmissionReadinessDto? readiness = null, bool workflowDown = false)
         {
             var directory = new Mock<IUserDirectoryClient>();
             directory.Setup(d => d.LookupAsync(It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
@@ -46,10 +46,24 @@ public class EngagementWorkflowIntegrationTests(SqlServerFixture sql)
                 Regions = ["EMEA", "APAC", "AMER"],
                 ConfigTypes = ["Equities", "Fixed Income", "Derivatives", "FX"]
             };
-            return new EngagementService(Repository, directory.Object, Db.UnitOfWork, new SqlOutbox(), Options.Create(catalogue), current.Object, TimeProvider.System);
+            var workflow = new Mock<IWorkflowReadinessClient>();
+            if (workflowDown)
+                workflow.Setup(w => w.GetReadinessAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new HttpRequestException("down"));
+            else
+                workflow.Setup(w => w.GetReadinessAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(readiness ?? new SubmissionReadinessDto(true, []));
+            return new EngagementService(Repository, directory.Object, Db.UnitOfWork, new SqlOutbox(), Options.Create(catalogue), current.Object, TimeProvider.System, workflow.Object);
         }
 
         public WorkActivityHandler Activity => new(Repository, new SqlOutbox(), TimeProvider.System, NullLogger<WorkActivityHandler>.Instance);
+
+        public ReviewDecisionApplier Decisions => new(Repository, new SqlOutbox(), TimeProvider.System, NullLogger<ReviewDecisionApplier>.Instance);
+
+        public async Task DecideAsync(string engagementId, Trigger trigger, DemoUser reviewer)
+        {
+            await using var uow = await Db.UnitOfWork.BeginAsync(CancellationToken.None);
+            await Decisions.ApplyAsync(engagementId, trigger, reviewer.UserId, new EventActor(reviewer.UserId.ToString(), reviewer.DisplayName), uow, CancellationToken.None);
+            await uow.CommitAsync(CancellationToken.None);
+        }
 
         public async Task HandleAsync(string engagementId, DemoUser actor, string eventType = EventTypes.SectionUpdated)
         {
@@ -355,5 +369,167 @@ public class EngagementWorkflowIntegrationTests(SqlServerFixture sql)
         Assert.Equal(EngagementStatus.InProgress, access.Status);
         Assert.Contains(Capabilities.Submit, access.Capabilities);
         Assert.Equal(RowVersion.ToToken(await env.Db.ScalarAsync<byte[]>("SELECT RowVer FROM dbo.Engagements WHERE EngagementId = 'ENG-1005'")), access.Version);
+    }
+
+    // ---- Submit (Phase 3) ---------------------------------------------------------------------------------------
+
+    private static IssueDto BlockingError() => new("FIELD_REQUIRED", IssueSeverity.Error, IssueScope.Field, "Required", 2, "section-2-1", "sourceSystem", true);
+
+    [Fact]
+    public async Task Submit_moves_to_under_review_bumps_the_cycle_and_publishes_both_events()
+    {
+        var env = await SeededAsync();
+
+        var submitted = await env.ServiceFor(Alice).SubmitAsync("ENG-1002", null, default);
+
+        Assert.Equal(EngagementStatus.UnderReview, submitted.Status);
+        Assert.Equal(1, await env.Db.ScalarAsync<int>("SELECT SubmissionCount FROM dbo.Engagements WHERE EngagementId = 'ENG-1002'"));
+        var submittedEvent = (await env.LastPayloadAsync(EventTypes.EngagementSubmitted, "ENG-1002")).GetProperty("payload");
+        Assert.Equal(1, submittedEvent.GetProperty("cycle").GetInt32());
+        Assert.Equal(Alice.UserId, submittedEvent.GetProperty("submittedBy").GetGuid());
+        var changed = (await env.LastPayloadAsync(EventTypes.EngagementStatusChanged, "ENG-1002")).GetProperty("payload");
+        Assert.Equal("UnderReview", changed.GetProperty("to").GetString());
+        Assert.Equal(submitted.Version, changed.GetProperty("version").GetString());
+        Assert.DoesNotContain("submit", submitted.AllowedActions);
+    }
+
+    [Fact]
+    public async Task Submit_with_blocking_errors_is_refused_with_the_issues_and_changes_nothing()
+    {
+        var env = await SeededAsync();
+        var service = env.ServiceFor(Alice, new SubmissionReadinessDto(false, [BlockingError()]));
+
+        var blocked = await Assert.ThrowsAsync<SubmissionBlockedException>(() => service.SubmitAsync("ENG-1002", null, default));
+
+        Assert.Single(blocked.Issues);
+        Assert.Equal("InProgress", await env.StatusAsync("ENG-1002"));
+        Assert.Equal(0, await env.EventsAsync(EventTypes.EngagementSubmitted, "ENG-1002"));
+    }
+
+    [Theory]
+    [InlineData("ENG-1001")] // Draft
+    [InlineData("ENG-1003")] // Under Review
+    [InlineData("ENG-1004")] // Approved
+    [InlineData("ENG-1005")] // Rejected: must be reworked (In Progress) first
+    public async Task Submit_is_only_possible_from_in_progress(string id)
+    {
+        var env = await SeededAsync();
+
+        await Assert.ThrowsAsync<ForbiddenException>(() => env.ServiceFor(Alice).SubmitAsync(id, null, default));
+    }
+
+    [Fact]
+    public async Task Only_an_auditor_can_submit()
+    {
+        var env = await SeededAsync();
+
+        await Assert.ThrowsAsync<ForbiddenException>(() => env.ServiceFor(Rohan).SubmitAsync("ENG-1002", null, default)); // reviewer
+        await Assert.ThrowsAsync<ForbiddenException>(() => env.ServiceFor(Victor).SubmitAsync("ENG-1005", null, default)); // viewer
+        Assert.Equal("InProgress", await env.StatusAsync("ENG-1002"));
+    }
+
+    [Fact]
+    public async Task Submit_with_a_stale_version_is_a_conflict_but_without_one_it_relies_on_the_status_guard()
+    {
+        var env = await SeededAsync();
+        var stale = (await env.ServiceFor(Alice).GetAsync("ENG-1002", default)).Version;
+        await env.HandleAsync("ENG-1002", Alice); // an ordinary save touches the activity time and moves the version
+
+        await Assert.ThrowsAsync<ConcurrencyException>(() => env.ServiceFor(Alice).SubmitAsync("ENG-1002", stale, default));
+        var submitted = await env.ServiceFor(Alice).SubmitAsync("ENG-1002", null, default);
+
+        Assert.Equal(EngagementStatus.UnderReview, submitted.Status);
+    }
+
+    [Fact]
+    public async Task Two_simultaneous_submits_produce_exactly_one_transition()
+    {
+        var env = await SeededAsync();
+
+        var results = await Task.WhenAll(Attempt(env.ServiceFor(Alice)), Attempt(env.ServiceFor(Bob)));
+
+        Assert.Single(results, ok => ok);
+        Assert.Equal(1, await env.EventsAsync(EventTypes.EngagementSubmitted, "ENG-1002"));
+
+        static async Task<bool> Attempt(EngagementService service)
+        {
+            try { await service.SubmitAsync("ENG-1002", null, default); return true; }
+            catch (Exception ex) when (ex is ForbiddenException or ConcurrencyException) { return false; }
+        }
+    }
+
+    [Fact]
+    public async Task Submit_surfaces_a_workflow_outage_instead_of_guessing()
+    {
+        var env = await SeededAsync();
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => env.ServiceFor(Alice, workflowDown: true).SubmitAsync("ENG-1002", null, default));
+
+        Assert.Equal("InProgress", await env.StatusAsync("ENG-1002"));
+    }
+
+    // ---- Review decisions applied from events (Phase 3) ---------------------------------------------------------
+
+    [Fact]
+    public async Task An_approval_from_the_assigned_reviewer_approves_and_locks_the_engagement()
+    {
+        var env = await SeededAsync();
+
+        await env.DecideAsync("ENG-1003", Trigger.Approve, Rachel);
+
+        Assert.Equal("Approved", await env.StatusAsync("ENG-1003"));
+        Assert.Equal(1, await env.EventsAsync(EventTypes.EngagementStatusChanged, "ENG-1003"));
+        var alice = await env.ServiceFor(Alice).GetAccessAsync("ENG-1003", default);
+        Assert.DoesNotContain(Capabilities.Edit, alice.Capabilities);
+    }
+
+    [Fact]
+    public async Task A_rejection_moves_to_rejected_and_the_next_edit_reopens_it()
+    {
+        var env = await SeededAsync();
+
+        await env.DecideAsync("ENG-1003", Trigger.Reject, Rachel);
+        Assert.Equal("Rejected", await env.StatusAsync("ENG-1003"));
+        await env.HandleAsync("ENG-1003", Alice);
+
+        Assert.Equal("InProgress", await env.StatusAsync("ENG-1003"));
+    }
+
+    [Fact]
+    public async Task A_decision_from_someone_other_than_the_assigned_reviewer_is_ignored()
+    {
+        var env = await SeededAsync();
+
+        await env.DecideAsync("ENG-1003", Trigger.Approve, Rohan); // a reviewer, but not on this engagement
+        await env.DecideAsync("ENG-1003", Trigger.Approve, Victor);
+
+        Assert.Equal("UnderReview", await env.StatusAsync("ENG-1003"));
+        Assert.Equal(0, await env.EventsAsync(EventTypes.EngagementStatusChanged, "ENG-1003"));
+    }
+
+    [Theory]
+    [InlineData("ENG-1002")] // In Progress
+    [InlineData("ENG-1004")] // already Approved
+    public async Task A_decision_when_not_under_review_is_ignored(string id)
+    {
+        var env = await SeededAsync();
+        var before = await env.StatusAsync(id);
+        var reviewer = id == "ENG-1002" ? Rohan : Rachel;
+
+        await env.DecideAsync(id, Trigger.Reject, reviewer);
+
+        Assert.Equal(before, await env.StatusAsync(id));
+    }
+
+    [Fact]
+    public async Task A_redelivered_decision_changes_nothing_the_second_time()
+    {
+        var env = await SeededAsync();
+
+        await env.DecideAsync("ENG-1003", Trigger.Approve, Rachel);
+        await env.DecideAsync("ENG-1003", Trigger.Approve, Rachel);
+
+        Assert.Equal("Approved", await env.StatusAsync("ENG-1003"));
+        Assert.Equal(1, await env.EventsAsync(EventTypes.EngagementStatusChanged, "ENG-1003"));
     }
 }

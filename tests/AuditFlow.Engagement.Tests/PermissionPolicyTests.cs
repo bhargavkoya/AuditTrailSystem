@@ -118,7 +118,11 @@ public class PermissionPolicyTests
         Assert.Equal([EngagementActions.Open, EngagementActions.Edit, EngagementActions.EditDetails], PermissionPolicy.AllowedActionsFor(Auditor, Draft));
         Assert.Equal([EngagementActions.Open, EngagementActions.Edit, EngagementActions.Submit], PermissionPolicy.AllowedActionsFor(Auditor, InProgress));
         Assert.Equal([EngagementActions.Open, EngagementActions.Review], PermissionPolicy.AllowedActionsFor(Reviewer, UnderReview));
-        Assert.Equal([EngagementActions.Open], PermissionPolicy.AllowedActionsFor(Reviewer, Approved));
+        Assert.Equal([EngagementActions.Open, EngagementActions.ViewReview], PermissionPolicy.AllowedActionsFor(Reviewer, Approved));
+        Assert.Equal([EngagementActions.Open, EngagementActions.ViewReview], PermissionPolicy.AllowedActionsFor(Auditor, UnderReview));
+        Assert.Equal([EngagementActions.Open, EngagementActions.Edit, EngagementActions.ViewReview], PermissionPolicy.AllowedActionsFor(Auditor, Rejected));
+        Assert.Equal([EngagementActions.Open], PermissionPolicy.AllowedActionsFor(Viewer, UnderReview));
+        Assert.Equal([EngagementActions.Open], PermissionPolicy.AllowedActionsFor(Viewer, Approved));
         Assert.Equal([EngagementActions.Open], PermissionPolicy.AllowedActionsFor(Viewer, InProgress));
     }
 }

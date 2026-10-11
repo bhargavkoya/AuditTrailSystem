@@ -37,6 +37,8 @@ public sealed record EngagementWithRole(EngagementRow Engagement, EngagementRole
 
 public sealed record DetailsUpdate(string Name, string PeriodType, string Region, Guid ReviewerUserId);
 
+public sealed record SubmitOutcome(byte[] RowVer, int SubmissionCount);
+
 public interface IEngagementRepository
 {
     /// <summary>
@@ -50,6 +52,9 @@ public interface IEngagementRepository
 
     /// <summary>The only status writer: <c>WHERE Status = @from</c>. Returns the new version, or null when the status was not @from.</summary>
     Task<byte[]?> TransitionAsync(IUnitOfWork uow, string engagementId, EngagementStatus from, EngagementStatus to, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>InProgress -> UnderReview and SubmissionCount + 1, guarded by status (and by version when given). Null when the guard failed.</summary>
+    Task<SubmitOutcome?> SubmitAsync(IUnitOfWork uow, string engagementId, byte[]? expectedVersion, DateTimeOffset now, CancellationToken ct);
 
     Task TouchActivityAsync(IUnitOfWork uow, string engagementId, DateTimeOffset now, CancellationToken ct);
 
@@ -91,6 +96,14 @@ public sealed class EngagementRepository(IDbConnectionFactory connections) : IEn
             OUTPUT inserted.RowVer
             WHERE EngagementId = @engagementId AND Status = @from
             """, new { engagementId, from = from.ToString(), to = to.ToString(), now }, ct);
+
+    public Task<SubmitOutcome?> SubmitAsync(IUnitOfWork uow, string engagementId, byte[]? expectedVersion, DateTimeOffset now, CancellationToken ct)
+        => uow.QuerySingleOrDefaultAsync<SubmitOutcome>($"""
+            UPDATE dbo.Engagements
+            SET Status = N'UnderReview', SubmissionCount = SubmissionCount + 1, LastActivityAt = @now
+            OUTPUT inserted.RowVer, inserted.SubmissionCount
+            WHERE EngagementId = @engagementId AND Status = N'InProgress'{(expectedVersion is null ? string.Empty : " AND RowVer = @expectedVersion")}
+            """, new { engagementId, expectedVersion, now }, ct);
 
     public Task TouchActivityAsync(IUnitOfWork uow, string engagementId, DateTimeOffset now, CancellationToken ct)
         => uow.ExecuteAsync("UPDATE dbo.Engagements SET LastActivityAt = @now WHERE EngagementId = @engagementId", new { engagementId, now }, ct);

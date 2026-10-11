@@ -67,3 +67,15 @@ public sealed record ValidationSummaryChangedPayload(int Errors, int Warnings, i
 
 /// <summary>AttachmentAdded v1.</summary>
 public sealed record AttachmentAddedPayload(AttachmentScope Scope, int? TabNo, string? SectionKey, Guid AttachmentId, string FileName);
+
+/// <summary>EngagementSubmitted v1. <c>Cycle</c> is the submission count (1 for the first submission, 2 after one rework, ...).</summary>
+public sealed record EngagementSubmittedPayload(Guid SubmittedBy, string SubmittedByName, int Cycle);
+
+/// <summary>ReviewerCommentAdded v1: ids only. The comment text stays in review-service behind its access check.</summary>
+public sealed record ReviewerCommentAddedPayload(Guid CommentId, int TabNo, Guid AuthorId, int Cycle);
+
+/// <summary>ReviewApproved v1. The decision text (if any) is not carried.</summary>
+public sealed record ReviewApprovedPayload(Guid DecisionId, Guid ReviewerId, int Cycle);
+
+/// <summary>ReviewRejected v1. The mandatory rejection comment is not carried; consumers read it from review-service.</summary>
+public sealed record ReviewRejectedPayload(Guid DecisionId, Guid ReviewerId, int Cycle);

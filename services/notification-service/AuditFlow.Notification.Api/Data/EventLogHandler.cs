@@ -27,23 +27,3 @@ public sealed class EventLogHandler : IEventHandler<JsonElement>
         }, cancellationToken);
 }
 
-public sealed record EventLogRow(long Seq, string EventType, string EngagementId, string CorrelationId, DateTimeOffset OccurredAt, DateTimeOffset ReceivedAt);
-
-public interface IEventLogReader
-{
-    Task<IReadOnlyList<EventLogRow>> RecentAsync(string? engagementId, int take, CancellationToken ct);
-}
-
-public sealed class EventLogReader(IDbConnectionFactory connections) : IEventLogReader
-{
-    public async Task<IReadOnlyList<EventLogRow>> RecentAsync(string? engagementId, int take, CancellationToken ct)
-    {
-        await using var connection = await connections.OpenAsync(ct);
-        return (await connection.QueryAsync<EventLogRow>("""
-            SELECT TOP (@take) Seq, EventType, EngagementId, ISNULL(CorrelationId, N'') AS CorrelationId, OccurredAt, ReceivedAt
-            FROM dbo.DomainEventLog
-            WHERE (@engagementId IS NULL OR EngagementId = @engagementId)
-            ORDER BY Seq DESC
-            """, new { take = Math.Clamp(take, 1, 200), engagementId }, ct)).ToList();
-    }
-}

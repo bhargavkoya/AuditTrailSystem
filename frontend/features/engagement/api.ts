@@ -93,3 +93,20 @@ export function useUploadAttachment(id: string) {
     },
   })
 }
+
+/**
+ * Submit for review. The backend refuses with 422 plus the blocking issues; the client has no readiness logic.
+ * No If-Match: ordinary saves also move the engagement's version, so the status guard on the server decides.
+ */
+export function useSubmit(id: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api<EngagementDetail>(`/engagements/${id}/submit`, { method: 'POST' }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['engagement', id], updated)
+      for (const key of [['tabs', id], ['tab', id], ['validation-summary', id], ['attachments', id], ['review', id], ['engagements']])
+        void queryClient.invalidateQueries({ queryKey: key })
+    },
+    onError: () => void queryClient.invalidateQueries({ queryKey: ['engagement', id] }),
+  })
+}

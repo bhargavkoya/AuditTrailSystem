@@ -23,10 +23,10 @@ Events are written to the publisher's outbox in the same transaction as the stat
 | `SectionUpdated` | workflow | engagement (work started), notification | **published in Phase 2** |
 | `AttachmentAdded` | attachment | workflow (presence + revalidate), notification | **published in Phase 2** |
 | `ValidationSummaryChanged` | workflow | notification | **published in Phase 2**, only when the summary hash changed |
-| `EngagementStatusChanged` | engagement | workflow, attachment (cache eviction), review, notification | **published in Phase 2** (StartWork / StartRework); Submit / Approve / Reject in Phase 3 |
-| `EngagementSubmitted` | engagement | review, notification | declared, Phase 3 |
-| `ReviewerCommentAdded` | review | notification | declared, Phase 3 |
-| `ReviewApproved` / `ReviewRejected` | review | engagement, notification | declared, Phase 3 |
+| `EngagementStatusChanged` | engagement | workflow, attachment, review (cache eviction), notification | **published in Phase 2** (StartWork / StartRework); **Phase 3**: Submit, Approve, Reject |
+| `EngagementSubmitted` | engagement | review (opens a cycle), notification | **published in Phase 3** |
+| `ReviewerCommentAdded` | review | notification (not forwarded to Viewers) | **published in Phase 3** |
+| `ReviewApproved` / `ReviewRejected` | review | engagement (applies the transition), notification | **published in Phase 3** |
 
 Type names live in `AuditFlow.Contracts.Events.EventTypes`; payload records in the same project.
 
@@ -58,6 +58,22 @@ Type names live in `AuditFlow.Contracts.Events.EventTypes`; payload records in t
 { "from": "Draft", "to": "InProgress", "reason": "StartWork", "version": "..." }
 ```
 
+## Phase 3 payloads (schemaVersion 1; ids and names only)
+
+```json
+// EngagementSubmitted: cycle = the submission count (1, 2, ...)
+{ "submittedBy": "guid", "submittedByName": "Alice Auditor", "cycle": 1 }
+// ReviewerCommentAdded: the comment text stays in review-service
+{ "commentId": "guid", "tabNo": 2, "authorId": "guid", "cycle": 1 }
+// ReviewApproved / ReviewRejected: the decision text (and the mandatory rejection comment) stays in review-service
+{ "decisionId": "guid", "reviewerId": "guid", "cycle": 1 }
+// EngagementStatusChanged now also carries reason "Submit", "Approve" or "Reject"
+{ "from": "InProgress", "to": "UnderReview", "reason": "Submit", "version": "..." }
+```
+
+The stream (`GET /engagements/{id}/events/stream`) forwards these envelopes unchanged (see `docs/api`), except that attachment and
+comment events are withheld from callers without the matching capability.
+
 ## Subscriptions (`infra/local/servicebus/Config.json`)
 
 | Subscription | Receives |
@@ -66,6 +82,6 @@ Type names live in `AuditFlow.Contracts.Events.EventTypes`; payload records in t
 | `engagement` | SectionUpdated, ConfigurationChanged, ReviewApproved, ReviewRejected |
 | `workflow` | EngagementCreated, EngagementUpdated, AttachmentAdded, EngagementStatusChanged |
 | `attachment` | EngagementCreated (demo files), EngagementStatusChanged |
-| `review` | EngagementSubmitted, EngagementStatusChanged |
+| `review` | EngagementCreated (demo review history), EngagementSubmitted, EngagementStatusChanged |
 
 Filters are correlation rules on the message Subject (one rule per event type).
