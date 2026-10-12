@@ -225,6 +225,8 @@ public sealed class ServiceBusSubscriberHost(
         }
     }
 
+    public static bool IsLastDelivery(int deliveryCount, int maxDeliveryCount) => deliveryCount >= maxDeliveryCount;
+
     private async Task HandleAsync(ProcessMessageEventArgs args, string consumerName)
     {
         var message = args.Message;
@@ -239,7 +241,16 @@ public sealed class ServiceBusSubscriberHost(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Handling {EventType} {MessageId} failed (delivery {Count})", eventType, message.MessageId, message.DeliveryCount);
+            if (IsLastDelivery(message.DeliveryCount, options.Value.MaxDeliveryCount))
+            {
+                AuditFlowMetrics.RecordDeadLettered(eventType);
+                logger.LogError(ex, "Handling {EventType} {MessageId} failed on its last delivery ({Count} of {Max}); the broker will dead-letter it. See docs/architecture/runbook.md",
+                    eventType, message.MessageId, message.DeliveryCount, options.Value.MaxDeliveryCount);
+            }
+            else
+            {
+                logger.LogError(ex, "Handling {EventType} {MessageId} failed (delivery {Count})", eventType, message.MessageId, message.DeliveryCount);
+            }
             await args.AbandonMessageAsync(message, cancellationToken: args.CancellationToken);
         }
     }

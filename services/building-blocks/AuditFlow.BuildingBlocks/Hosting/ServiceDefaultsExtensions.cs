@@ -131,6 +131,11 @@ public static class ServiceDefaultsExtensions
         var service = app.Services.GetRequiredService<ServiceInfo>().Name;
 
         app.UseMiddleware<CorrelationIdMiddleware>();
+        app.Use((context, next) =>
+        {
+            context.Response.Headers.XContentTypeOptions = "nosniff";
+            return next(context);
+        });
         app.UseExceptionHandler();
         app.UseSwagger();
         app.UseSwaggerUI();

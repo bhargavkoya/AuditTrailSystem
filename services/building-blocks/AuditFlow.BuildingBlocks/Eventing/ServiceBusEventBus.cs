@@ -15,6 +15,12 @@ public sealed class ServiceBusOptions
 
     /// <summary>Subscription this service consumes from. Empty = the service does not consume.</summary>
     public string SubscriptionName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Must match MaxDeliveryCount on the subscription (infra/local/servicebus/Config.json, the Azure subscription). On that
+    /// delivery a failure is logged as dead-lettered and counted; the broker then moves the message to the dead-letter queue.
+    /// </summary>
+    public int MaxDeliveryCount { get; set; } = 5;
 }
 
 public static class JsonDefaults
@@ -32,6 +38,39 @@ public sealed class ServiceBusEventBus(ServiceBusClient client, IOptions<Service
 
     public async Task PublishAsync<TPayload>(EventEnvelope<TPayload> envelope, CancellationToken cancellationToken = default)
     {
+        // A "publish" span is current when the caller made one; consumers parent their span on it.
+        var activity = Activity.Current;
+        var message = Build(envelope, activity?.IdFormat == ActivityIdFormat.W3C ? activity.Id : null, activity?.TraceStateString);
+        await sender.SendMessageAsync(message, cancellationToken);
+    }
+
+    public async Task PublishBatchAsync(IReadOnlyList<OutgoingEvent> events, CancellationToken cancellationToken = default)
+    {
+        var batch = await sender.CreateMessageBatchAsync(cancellationToken);
+        try
+        {
+            foreach (var e in events)
+            {
+                var message = Build(e.Envelope, e.TraceParent, e.TraceState);
+                if (batch.TryAddMessage(message)) continue;
+
+                if (batch.Count == 0) throw new InvalidOperationException($"Event {e.Envelope.EventId} is too large for a Service Bus message.");
+                await sender.SendMessagesAsync(batch, cancellationToken);
+                batch.Dispose();
+                batch = await sender.CreateMessageBatchAsync(cancellationToken);
+                if (!batch.TryAddMessage(message)) throw new InvalidOperationException($"Event {e.Envelope.EventId} is too large for a Service Bus message.");
+            }
+
+            if (batch.Count > 0) await sender.SendMessagesAsync(batch, cancellationToken);
+        }
+        finally
+        {
+            batch.Dispose();
+        }
+    }
+
+    private static ServiceBusMessage Build<TPayload>(EventEnvelope<TPayload> envelope, string? traceParent, string? traceState)
+    {
         var message = new ServiceBusMessage(JsonSerializer.SerializeToUtf8Bytes(envelope, JsonDefaults.Web))
         {
             MessageId = envelope.EventId.ToString(),
@@ -43,16 +82,13 @@ public sealed class ServiceBusEventBus(ServiceBusClient client, IOptions<Service
         message.ApplicationProperties["EngagementId"] = envelope.EngagementId;
         message.ApplicationProperties["SchemaVersion"] = envelope.SchemaVersion;
 
-        // Dispatcher's "publish" span is current here; consumers parent their span on it.
-        var activity = Activity.Current;
-        if (activity?.IdFormat == ActivityIdFormat.W3C && activity.Id is not null)
+        if (!string.IsNullOrEmpty(traceParent))
         {
-            message.ApplicationProperties[TraceContextKeys.TraceParent] = activity.Id;
-            if (!string.IsNullOrEmpty(activity.TraceStateString))
-                message.ApplicationProperties[TraceContextKeys.TraceState] = activity.TraceStateString;
+            message.ApplicationProperties[TraceContextKeys.TraceParent] = traceParent;
+            if (!string.IsNullOrEmpty(traceState)) message.ApplicationProperties[TraceContextKeys.TraceState] = traceState;
         }
 
-        await sender.SendMessageAsync(message, cancellationToken);
+        return message;
     }
 
     public ValueTask DisposeAsync() => sender.DisposeAsync();

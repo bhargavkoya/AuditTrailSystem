@@ -12,6 +12,13 @@ public sealed class InMemoryEventBus(ILogger<InMemoryEventBus> logger) : IEventB
 
     public IReadOnlyList<object> Published => published;
 
+    public Task PublishBatchAsync(IReadOnlyList<OutgoingEvent> events, CancellationToken cancellationToken = default)
+    {
+        foreach (var e in events) published.Add(e.Envelope);
+        logger.LogInformation("In-memory bus recorded {Count} events (not delivered)", events.Count);
+        return Task.CompletedTask;
+    }
+
     public Task PublishAsync<TPayload>(EventEnvelope<TPayload> envelope, CancellationToken cancellationToken = default)
     {
         published.Add(envelope);

@@ -49,8 +49,9 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
         var db = await sql.CreateDatabaseAsync();
         var published = new List<string>();
         var bus = new Mock<IEventBus>();
-        bus.Setup(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()))
-            .Callback<EventEnvelope<System.Text.Json.JsonElement>, CancellationToken>((e, _) => published.Add(e.Payload.GetProperty("text").GetString()!))
+        bus.Setup(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()))
+            .Callback<IReadOnlyList<OutgoingEvent>, CancellationToken>((events, _) =>
+                published.AddRange(events.Select(e => e.Envelope.Payload.GetProperty("text").GetString()!)))
             .Returns(Task.CompletedTask);
         await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("first")), commit: true);
         await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("second")), commit: true);
@@ -59,6 +60,7 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
 
         Assert.Equal(2, count);
         Assert.Equal(["first", "second"], published);
+        bus.Verify(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()), Times.Once); // one broker round trip for the whole poll
         Assert.Equal(0, await db.ScalarAsync<int>("SELECT COUNT(*) FROM dbo.OutboxMessage WHERE PublishedAt IS NULL"));
         Assert.Equal(0, await NewDispatcher(db, bus.Object).DispatchBatchAsync(CancellationToken.None)); // nothing re-published
     }
@@ -87,16 +89,16 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
         var storedParent = await db.ScalarAsync<string>("SELECT TraceParent FROM dbo.OutboxMessage");
         Assert.Contains(requestTraceId, storedParent);
 
-        string? activeOnPublish = null;
+        string? traceParentOnMessage = null;
         var bus = new Mock<IEventBus>();
-        bus.Setup(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()))
-            .Callback(() => activeOnPublish = Activity.Current?.Id)
+        bus.Setup(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()))
+            .Callback<IReadOnlyList<OutgoingEvent>, CancellationToken>((events, _) => traceParentOnMessage = events.Single().TraceParent)
             .Returns(Task.CompletedTask);
         await NewDispatcher(db, bus.Object).DispatchBatchAsync(CancellationToken.None);
 
         var publish = Assert.Single(started, a => a.OperationName == "publish Ping");
         Assert.Equal(requestSpanId, publish.ParentSpanId);
-        Assert.Equal(publish.Id, activeOnPublish);
+        Assert.Equal(publish.Id, traceParentOnMessage); // the message carries the publish span, itself a child of the request
     }
 
     [Fact]
@@ -116,7 +118,7 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
     {
         var db = await sql.CreateDatabaseAsync();
         var bus = new Mock<IEventBus>();
-        bus.Setup(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()))
+        bus.Setup(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("bus down"));
         await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("x")), commit: true);
 
@@ -136,11 +138,11 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
         var delivered = new List<string>();
         var busDown = true;
         var bus = new Mock<IEventBus>();
-        bus.Setup(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()))
-            .Returns<EventEnvelope<System.Text.Json.JsonElement>, CancellationToken>((e, _) =>
+        bus.Setup(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()))
+            .Returns<IReadOnlyList<OutgoingEvent>, CancellationToken>((events, _) =>
             {
                 if (busDown) throw new InvalidOperationException("bus down");
-                delivered.Add(e.Payload.GetProperty("text").GetString()!);
+                delivered.AddRange(events.Select(e => e.Envelope.Payload.GetProperty("text").GetString()!));
                 return Task.CompletedTask;
             });
         await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("first")), commit: true);
@@ -149,7 +151,7 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
 
         Assert.Equal(0, await dispatcher.DispatchBatchAsync(default));                 // attempt 1 fails
         Assert.Equal(0, await dispatcher.DispatchBatchAsync(default));                 // still backing off: bus not even called
-        bus.Verify(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()), Times.Once);
+        bus.Verify(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()), Times.Once);
 
         clock.Advance(TimeSpan.FromSeconds(2));
         Assert.Equal(0, await dispatcher.DispatchBatchAsync(default));                 // attempt 2 fails, backoff doubles
@@ -167,7 +169,7 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
         var db = await sql.CreateDatabaseAsync();
         var clock = new ManualClock(DateTimeOffset.UtcNow);
         var bus = new Mock<IEventBus>();
-        bus.Setup(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()))
+        bus.Setup(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("bus down"));
         await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("x")), commit: true);
         var dispatcher = NewDispatcher(db, bus.Object, clock);

@@ -14,6 +14,7 @@ public static class AuditFlowMetrics
     public static readonly Counter<long> EventsConsumed = Meter.CreateCounter<long>("auditflow.events.consumed");
     public static readonly Counter<long> EventsFailed = Meter.CreateCounter<long>("auditflow.events.failed");
     public static readonly Counter<long> EventsDuplicates = Meter.CreateCounter<long>("auditflow.events.duplicates");
+    public static readonly Counter<long> EventsDeadLettered = Meter.CreateCounter<long>("auditflow.events.dead_lettered");
     public static readonly Counter<long> ConcurrencyConflicts = Meter.CreateCounter<long>("auditflow.concurrency.conflicts");
     public static readonly Counter<long> SseDropped = Meter.CreateCounter<long>("auditflow.sse.dropped");
     public static readonly Counter<long> LifecycleTransitions = Meter.CreateCounter<long>("auditflow.lifecycle.transitions");
@@ -36,6 +37,7 @@ public static class AuditFlowMetrics
 
     public static void RecordConsumed(string eventType) => EventsConsumed.Add(1, EventTag(eventType));
     public static void RecordFailed(string eventType) => EventsFailed.Add(1, EventTag(eventType));
+    public static void RecordDeadLettered(string eventType) => EventsDeadLettered.Add(1, EventTag(eventType));
     public static void RecordDuplicate(string eventType) => EventsDuplicates.Add(1, EventTag(eventType));
 
     public static void RecordConflict(string? resource)

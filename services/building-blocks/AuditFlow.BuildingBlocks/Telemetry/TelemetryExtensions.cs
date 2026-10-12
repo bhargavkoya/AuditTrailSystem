@@ -48,6 +48,13 @@ public static class TelemetryExtensions
                 else if (!string.IsNullOrWhiteSpace(otlp)) m.AddOtlpExporter();
             });
 
+        // Two sources of log volume that cost real CPU under load and say nothing useful:
+        //  - the framework logs an Error with a stack trace for EVERY exception, even the ones AuditFlowExceptionHandler turns
+        //    into expected 403/404/409 responses (genuinely unhandled exceptions are still logged by our handler);
+        //  - four Information lines per outgoing HttpClient call (the HTTP spans already record each call).
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware", LogLevel.None);
+        builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+
         // Console keeps scopes ({CorrelationId}, {EngagementId}) so a grep by id works with no backend at all.
         builder.Logging.AddSimpleConsole(o =>
         {

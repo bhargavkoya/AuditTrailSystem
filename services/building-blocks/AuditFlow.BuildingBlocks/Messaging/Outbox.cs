@@ -105,42 +105,79 @@ public sealed class OutboxDispatcher(
         if (rows.Count > 0 && rows[0].NextAttemptAt > now)
             return 0; // the oldest event is backing off; do not let newer ones overtake it
 
-        var published = 0;
+        // Prepare the rows in order, stopping at the first one that cannot even be read (it is retried first, like before).
+        var items = new List<(OutboxRow Row, OutgoingEvent Event, Activity? Span)>();
+        OutboxRow? unreadable = null;
+        Exception? unreadableError = null;
         foreach (var row in rows)
         {
             try
             {
-                var envelope = JsonSerializer.Deserialize<EventEnvelope<JsonElement>>(row.Envelope, JsonDefaults.Web)!;
-
-                // Child of the originating request; the bus stamps Activity.Current onto the message as traceparent.
-                ActivityContext.TryParse(row.TraceParent, row.TraceState, isRemote: true, out var parent);
-                using var activity = EventDispatcher.Source.StartActivity(
-                    $"publish {envelope.EventType}", ActivityKind.Producer, parent);
-                activity?.SetTag("auditflow.event_type", envelope.EventType);
-                activity?.SetTag("auditflow.engagement_id", envelope.EngagementId);
-                activity?.SetTag("auditflow.correlation_id", envelope.CorrelationId);
-
-                await bus.PublishAsync(envelope, ct);
-                await uow.ExecuteAsync("UPDATE dbo.OutboxMessage SET PublishedAt = @now WHERE Id = @Id", new { row.Id, now = clock.GetUtcNow() }, ct);
-                published++;
+                items.Add(Prepare(row));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                var backoff = TimeSpan.FromSeconds(Math.Min(MaxBackoffSeconds, Math.Pow(2, Math.Min(row.Attempts, 10))));
-                AuditFlowMetrics.OutboxPublishFailures.Add(1);
-                logger.LogWarning("Publishing outbox message {Id} failed (attempt {Attempt}); retrying in {Backoff}s: {Error}",
-                    row.Id, row.Attempts + 1, backoff.TotalSeconds, ex.Message);
-                await uow.ExecuteAsync(
-                    "UPDATE dbo.OutboxMessage SET Attempts = Attempts + 1, LastError = LEFT(@Error, 1000), NextAttemptAt = @next WHERE Id = @Id",
-                    new { row.Id, Error = ex.Message, next = clock.GetUtcNow().Add(backoff) }, ct);
-                break; // keep ordering: retry this row first
+                unreadable = row;
+                unreadableError = ex;
+                break;
             }
         }
+
+        // One round trip for the whole poll. The send is all-or-nothing, so a failure leaves every row unpublished and
+        // the head row carries the attempt count and backoff; ordering is preserved.
+        var published = 0;
+        var sendFailed = false;
+        if (items.Count > 0)
+        {
+            try
+            {
+                await bus.PublishBatchAsync(items.Select(i => i.Event).ToList(), ct);
+                await uow.ExecuteAsync("UPDATE dbo.OutboxMessage SET PublishedAt = @now WHERE Id IN @Ids",
+                    new { Ids = items.Select(i => i.Row.Id).ToArray(), now = clock.GetUtcNow() }, ct);
+                published = items.Count;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                sendFailed = true;
+                await RecordFailureAsync(uow, items[0].Row, ex, ct);
+            }
+            finally
+            {
+                for (var i = items.Count - 1; i >= 0; i--) items[i].Span?.Dispose();
+            }
+        }
+
+        if (unreadable is not null && !sendFailed)
+            await RecordFailureAsync(uow, unreadable, unreadableError!, ct);
 
         AuditFlowMetrics.SetOutboxPending(await uow.QuerySingleOrDefaultAsync<int>(
             "SELECT COUNT(*) FROM dbo.OutboxMessage WHERE PublishedAt IS NULL", null, ct));
         await uow.CommitAsync(ct);
         return published;
+    }
+
+    /// <summary>Child of the originating request; its id travels with the message as traceparent.</summary>
+    private static (OutboxRow Row, OutgoingEvent Event, Activity? Span) Prepare(OutboxRow row)
+    {
+        var envelope = JsonSerializer.Deserialize<EventEnvelope<JsonElement>>(row.Envelope, JsonDefaults.Web)!;
+        ActivityContext.TryParse(row.TraceParent, row.TraceState, isRemote: true, out var parent);
+        var span = EventDispatcher.Source.StartActivity($"publish {envelope.EventType}", ActivityKind.Producer, parent);
+        span?.SetTag("auditflow.event_type", envelope.EventType);
+        span?.SetTag("auditflow.engagement_id", envelope.EngagementId);
+        span?.SetTag("auditflow.correlation_id", envelope.CorrelationId);
+        // Without a listener there is no span: still pass the stored context on so consumers link to the request.
+        return (row, new OutgoingEvent(envelope, span?.Id ?? row.TraceParent, span?.TraceStateString ?? row.TraceState), span);
+    }
+
+    private async Task RecordFailureAsync(IUnitOfWork uow, OutboxRow row, Exception ex, CancellationToken ct)
+    {
+        var backoff = TimeSpan.FromSeconds(Math.Min(MaxBackoffSeconds, Math.Pow(2, Math.Min(row.Attempts, 10))));
+        AuditFlowMetrics.OutboxPublishFailures.Add(1);
+        logger.LogWarning("Publishing outbox message {Id} failed (attempt {Attempt}); retrying in {Backoff}s: {Error}",
+            row.Id, row.Attempts + 1, backoff.TotalSeconds, ex.Message);
+        await uow.ExecuteAsync(
+            "UPDATE dbo.OutboxMessage SET Attempts = Attempts + 1, LastError = LEFT(@Error, 1000), NextAttemptAt = @next WHERE Id = @Id",
+            new { row.Id, Error = ex.Message, next = clock.GetUtcNow().Add(backoff) }, ct);
     }
 
     private sealed record OutboxRow(
