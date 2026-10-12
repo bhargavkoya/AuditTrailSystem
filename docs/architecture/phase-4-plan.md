@@ -1,6 +1,6 @@
 # Phase 4: Hardening (observability, 409 UX, permission audit, load check, CI): detailed plan
 
-Status: **proposed, awaiting approval**. Builds on `implementation-plan.md` section 12 and the delivered Phases 1-3.
+Status: **delivered, with open verification items** (see section 8). Builds on `implementation-plan.md` section 12 and the delivered Phases 1-3.
 Branch: `feature/phase-4-hardening` (cut from `main` after Phase 3's PR #4 merged).
 
 ## 1. Goal and demo
@@ -117,7 +117,7 @@ all services --OTLP--> local dashboard (default)      or      Application Insigh
 | 409 compare UI adds client logic | strictly displays two values and moves a draft; it never decides validity or merges |
 | CI flakiness (Testcontainers, emulator start-up) | health wait with timeout, retry only the compose-smoke job's startup, logs uploaded on failure |
 
-## 7. Decisions needed (defaults in bold)
+## 7. Decisions (all accepted with the defaults in bold)
 1. **Local trace/metric/log backend = the .NET Aspire dashboard container** behind a compose profile. Alternative: Jaeger + Prometheus + Grafana (more pieces, more familiar names).
 2. **Trace context crosses the broker via `traceparent` stored in the outbox row** (a migration to every publishing service). Alternative: the Azure SDK's experimental ServiceBus activity source (no schema change, but publishing happens in the background dispatcher, so the parent would be the dispatcher, not the request).
 3. **Load tool = a dependency-free Node script.** Alternative: k6 (nicer reports and thresholds, requires installing it locally and in CI).
@@ -128,3 +128,47 @@ all services --OTLP--> local dashboard (default)      or      Application Insigh
 8. **Azure provisioning is documentation only** (env-var mapping for App Insights, Key Vault, Service Bus; no Bicep). Alternative: a minimal Bicep for the namespace, Key Vault and App Insights.
 9. **`DomainEventLog` retention stays unbuilt** (documented gap), since a purge needs the `resync` interplay tested properly; say if you want it in this phase.
 10. **Git flow:** commits per step on `feature/phase-4-hardening`; push and PR when you say.
+
+
+## 8. Delivered: status, deviations and open items
+
+### Verified (and how)
+| Item | Evidence |
+|---|---|
+| 4.1 trace context through outbox and broker | unit tests (parent / child, absent or invalid header) and integration tests (stored `traceparent`, publish span is a child of the request, none without an ambient span) |
+| 4.2 metrics and span tags | `MeterListener` unit tests |
+| 4.3 logs, SQL spans, readiness, fail-fast config | unit tests; live: `/health` of every service reports `sqlserver` and, where applicable, `servicebus` and `event-log-tailer` Healthy |
+| 4.4 observability profile | live: the Aspire dashboard container starts and listens (UI 18888, OTLP 18889), no service logs OTLP export errors |
+| 4.5 409 UX | type-check and build only; the UI was **not exercised in a browser** (you verify the UI) |
+| 4.6 route inventory | 25 tests; a mutation check (emptying the auth allow-list) fails and names the three anonymous routes; no unprotected route was found |
+| 4.7 permission audit | live: 841 checks, 0 mismatches; a deliberately wrong matrix fails with exit code 1 |
+| 4.8 outbox batching | integration tests (`MessagingIntegrationTests`, 9) |
+| 4.9 CI | linted with actionlint; **has not run on GitHub yet** |
+
+### Open items (not verified, say so in any demo)
+- **Trace tree in the dashboard** has not been looked at: no browser tool was available. Follow the walkthrough in `observability.md` once and correct it if the tree differs.
+- **Post-tuning load numbers** are not measured (Docker stopped while the final images were building). The first full run's numbers, its findings and the commands to re-measure are in `load-test-results.md`.
+- **Full integration suite after the outbox batching change:** only `MessagingIntegrationTests` was re-run; run `dotnet test --filter "Category=Integration"` before merging.
+- **Images were last built before** the dead-letter metric, `nosniff` header and gateway body limit were added, so those three are covered by unit tests only.
+- **CI** (including the compose smoke job) is untested on a real runner.
+
+### Deviations from this plan
+| Plan | Built | Why |
+|---|---|---|
+| Step 4.4 demo: "submit ENG-1003 as Bob" | submit a fresh engagement you have filled in | the seeded ENG-1003 is already Under Review and ENG-1002 has blocking errors |
+| Span / tag `auditflow.cycle` | not added | neither the request nor the event envelope carries the review cycle cheaply |
+| Key Vault: "env -> user secrets -> Key Vault" | Key Vault first, configuration as the fallback on "not found" (existing behaviour, now tested) | the plan text described the order backwards; changing the code would change which secret wins in Azure |
+| Startup validation of base URLs, metadata address, signing key | URLs and metadata address required outside Development; subscription name required when handlers exist; signing key **not** required | auth-service generates and stores its own key when none is supplied |
+| Readiness: separate endpoint | the existing `/health` runs every check, `/health/live` runs none | one endpoint was enough for the compose health wait and the CI wait |
+| Permission audit "about 150 checks" | 841 (two lifecycles, one per editor role, plus global checks) | covering Auditor and Co-Auditor symmetrically doubles the grid |
+| Load test reads p95 < 300 ms for all reads | the review screen (fans out to several services) and the contention reads are reported but outside that target | different cost profile; stated in `load-test-results.md` |
+| Load pacing 0.4 to 1.2 s between actions | default 2 to 5 s, the old pacing kept as `--think 400-1200` | the first pacing is a stress profile (about 115 req/s from 100 users), not 100 realistic users |
+| (not planned) outbox batch publish | added: `IEventBus.PublishBatchAsync`, one broker round trip per poll | the first load run showed per-message publishing capped the system near 25 events/s |
+| (not planned) log filters | framework exception log and per-call HttpClient info logs filtered | measured CPU cost under 409-heavy load |
+| Security headers / limits | `nosniff` on every API response, 12 MB body limit at the gateway, test that errors leak nothing | CORS origins were already configuration-driven |
+| Dead letters: metric and log | `auditflow.events.dead_lettered` and an error log on the last delivery; `ServiceBus:MaxDeliveryCount` must match the subscription | runbook documents replay |
+| Metric `auditflow.lifecycle.transitions` | recorded just before commit in consumer handlers | a failed commit that is retried counts the transition twice; acceptable for a metric |
+
+### Known gaps carried forward
+The submit race (an edit slipping in between readiness and the transition), `DomainEventLog` retention, a single notification-service instance
+(in-memory SSE hub), `/internal/*` protected by the gateway not routing it rather than by service credentials, and Azure provisioning (documentation only).

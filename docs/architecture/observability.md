@@ -20,6 +20,7 @@ Exporter choice is the same for all three: `APPLICATIONINSIGHTS_CONNECTION_STRIN
 | `auditflow.outbox.pending` | gauge | unpublished outbox rows at the last dispatcher poll |
 | `auditflow.outbox.publish_failures` | counter | |
 | `auditflow.events.consumed` / `.failed` / `.duplicates` | counter | `event_type` |
+| `auditflow.events.dead_lettered` | counter | `event_type`; the delivery that exhausts `MaxDeliveryCount` (see the runbook) |
 | `auditflow.concurrency.conflicts` | counter | `resource` (section key, `engagement`, `decision`) |
 | `auditflow.sse.connections` | gauge | open streams (notification-service) |
 | `auditflow.sse.dropped` | counter | clients told to `resync` |

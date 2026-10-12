@@ -3,7 +3,8 @@
 [![CI](https://github.com/bhargavkoya/AuditTrailSystem/actions/workflows/ci.yml/badge.svg)](https://github.com/bhargavkoya/AuditTrailSystem/actions/workflows/ci.yml)
 
 Backend-controlled audit engagement management platform: a demoable microservices skeleton.
-Spec: [docs/PRD.md](docs/PRD.md) | Plans: [implementation](docs/architecture/implementation-plan.md), [Phase 1](docs/architecture/phase-1-plan.md), [Phase 2](docs/architecture/phase-2-plan.md), [Phase 3](docs/architecture/phase-3-plan.md) |
+Spec: [docs/PRD.md](docs/PRD.md) | Plans: [implementation](docs/architecture/implementation-plan.md), [Phase 1](docs/architecture/phase-1-plan.md), [Phase 2](docs/architecture/phase-2-plan.md), [Phase 3](docs/architecture/phase-3-plan.md), [Phase 4](docs/architecture/phase-4-plan.md) |
+Operations: [runbook](docs/architecture/runbook.md), [observability](docs/architecture/observability.md), [load test](docs/architecture/load-test-results.md) |
 Decisions: [docs/decisions](docs/decisions) | API: [docs/api](docs/api/README.md) | Events: [contracts/events](contracts/events/README.md) |
 Conventions: [CLAUDE.md](CLAUDE.md)
 
@@ -17,7 +18,10 @@ Conventions: [CLAUDE.md](CLAUDE.md)
 - **Phase 3** (review and real time): submit with a backend readiness check, the separate review screen (tab comments, approve, reject with a
   mandatory comment, decision history per review cycle), the full state machine, and SSE live updates with replay, role-filtered events and
   conflict-aware reconciliation in the UI.
-- Next: Phase 4 (hardening: App Insights, 409 UX polish, permission audit, load check, CI).
+- **Phase 4** (hardening): one trace from the browser through the outbox and broker to every consumer, custom metrics and structured logs
+  (Application Insights, OTLP or the local Aspire dashboard), readiness checks and fail-fast configuration, a field-level "yours vs current"
+  409 experience, a route inventory test plus a black-box permission audit (841 checks), a ~100-user load test, and GitHub Actions CI.
+  See the status notes in [phase-4-plan.md](docs/architecture/phase-4-plan.md) (section 8) for what is verified and what is not.
 
 ## Prerequisites
 .NET 8 SDK (`global.json` pins 8.0.x), Docker Desktop, Node 20+.
@@ -88,6 +92,13 @@ dotnet build AuditFlow.sln
 dotnet test AuditFlow.sln                                   # everything (integration tests need Docker)
 dotnet test AuditFlow.sln --filter "Category!=Integration"  # fast unit tests only
 ```
+
+Against the running stack (`./infra/local/up.ps1`; both need Node 20+):
+```powershell
+./infra/local/permission-audit.ps1    # every role x status x operation vs tools/permission-audit/matrix.json (about 45 s); exit 1 on a mismatch
+./infra/local/load-test.ps1           # 100 users + 100 SSE streams (about 3.5 min); -Smoke for the 20-user CI version
+```
+`AuditFlow.Security.Tests` (no Docker) maps every service's real routes and fails if one lacks authorization and is not on an explicit allow-list.
 Unit tests cover the state machine (every invalid transition), the permission matrix, the create and update rules, login and tokens,
 the idempotent consumer pipeline, the access cache, and the whole workflow domain (every rule operator, rule-driven visibility,
 validation at field / section / tab level, reconciliation thresholds, value parsing, catalogue integrity, upload rules).

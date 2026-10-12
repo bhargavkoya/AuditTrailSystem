@@ -19,7 +19,7 @@ Source spec: `docs/PRD.md` (converted from `docs/auditflow_prd.docx`). Conventio
 | Phase 3 - Review and Real-Time | Submit, review screen, comments, approve/reject, full state machine, SSE | Two browsers: edit propagates live; submit, reject, rework, approve |
 | Phase 4 - Hardening | App Insights/OTel, 409 UX + concurrency tests, permission audit, ~100-user load check, CI | Trace one submit across services by correlation id; force a 409 |
 
-Telemetry config is wired in Phase 0; the PRD lists observability integration in Phase 4.
+Telemetry config is wired in Phase 0; the PRD lists observability integration in Phase 4 (delivered; see phase-4-plan.md section 8 for open verification items).
 
 ## 2. Microservices
 

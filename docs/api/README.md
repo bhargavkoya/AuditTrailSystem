@@ -2,7 +2,9 @@
 
 All routes below go through the gateway (`http://localhost:5000`). Each service also serves Swagger at `/swagger`
 (auth :5001, engagement :5002, ...). Authenticated routes take `Authorization: Bearer <accessToken>`.
-Errors are RFC 7807 problem details (`422` carries an `errors` map). Every response carries `X-Correlation-Id`.
+Errors are RFC 7807 problem details (`422` carries an `errors` map; `409` carries `currentVersion` and, for multi-section saves, `resource`). Every response carries `X-Correlation-Id`, and
+error bodies add `traceId` (Phase 4) so a failing call can be found in the trace backend. Unexpected errors return a generic 500 with no message, type or stack trace; every response
+carries `X-Content-Type-Options: nosniff`.
 
 ## Auth (auth-service)
 
