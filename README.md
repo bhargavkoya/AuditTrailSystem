@@ -1,7 +1,10 @@
 # AuditFlow (POC)
 
+[![CI](https://github.com/bhargavkoya/AuditTrailSystem/actions/workflows/ci.yml/badge.svg)](https://github.com/bhargavkoya/AuditTrailSystem/actions/workflows/ci.yml)
+
 Backend-controlled audit engagement management platform: a demoable microservices skeleton.
-Spec: [docs/PRD.md](docs/PRD.md) | Plans: [implementation](docs/architecture/implementation-plan.md), [Phase 1](docs/architecture/phase-1-plan.md), [Phase 2](docs/architecture/phase-2-plan.md), [Phase 3](docs/architecture/phase-3-plan.md) |
+Spec: [docs/PRD.md](docs/PRD.md) | Plans: [implementation](docs/architecture/implementation-plan.md), [Phase 1](docs/architecture/phase-1-plan.md), [Phase 2](docs/architecture/phase-2-plan.md), [Phase 3](docs/architecture/phase-3-plan.md), [Phase 4](docs/architecture/phase-4-plan.md) |
+Operations: [runbook](docs/architecture/runbook.md), [observability](docs/architecture/observability.md), [load test](docs/architecture/load-test-results.md) |
 Decisions: [docs/decisions](docs/decisions) | API: [docs/api](docs/api/README.md) | Events: [contracts/events](contracts/events/README.md) |
 Conventions: [CLAUDE.md](CLAUDE.md)
 
@@ -15,7 +18,10 @@ Conventions: [CLAUDE.md](CLAUDE.md)
 - **Phase 3** (review and real time): submit with a backend readiness check, the separate review screen (tab comments, approve, reject with a
   mandatory comment, decision history per review cycle), the full state machine, and SSE live updates with replay, role-filtered events and
   conflict-aware reconciliation in the UI.
-- Next: Phase 4 (hardening: App Insights, 409 UX polish, permission audit, load check, CI).
+- **Phase 4** (hardening): one trace from the browser through the outbox and broker to every consumer, custom metrics and structured logs
+  (Application Insights, OTLP or the local Aspire dashboard), readiness checks and fail-fast configuration, a field-level "yours vs current"
+  409 experience, a route inventory test plus a black-box permission audit (841 checks), a ~100-user load test, and GitHub Actions CI.
+  See the status notes in [phase-4-plan.md](docs/architecture/phase-4-plan.md) (section 8) for what is verified and what is not.
 
 ## Prerequisites
 .NET 8 SDK (`global.json` pins 8.0.x), Docker Desktop, Node 20+.
@@ -70,6 +76,7 @@ Create an engagement (it appears with "Setting up the workflow..." for a second)
 | auth / engagement / workflow / attachment / review / notification | 5001 to 5006 |
 | SQL Server | 1433 |
 | Service Bus emulator (AMQP / management) | 5672 / 5300 |
+| OpenTelemetry dashboard (UI / OTLP), `-Observability` only | 18888 / 4317 |
 
 Each service: `/health`, `/health/live`, `/swagger`. The gateway proxies `/health/{service}`.
 
@@ -85,6 +92,13 @@ dotnet build AuditFlow.sln
 dotnet test AuditFlow.sln                                   # everything (integration tests need Docker)
 dotnet test AuditFlow.sln --filter "Category!=Integration"  # fast unit tests only
 ```
+
+Against the running stack (`./infra/local/up.ps1`; both need Node 20+):
+```powershell
+./infra/local/permission-audit.ps1    # every role x status x operation vs tools/permission-audit/matrix.json (about 45 s); exit 1 on a mismatch
+./infra/local/load-test.ps1           # 100 users + 100 SSE streams (about 3.5 min); -Smoke for the 20-user CI version
+```
+`AuditFlow.Security.Tests` (no Docker) maps every service's real routes and fails if one lacks authorization and is not on an explicit allow-list.
 Unit tests cover the state machine (every invalid transition), the permission matrix, the create and update rules, login and tokens,
 the idempotent consumer pipeline, the access cache, and the whole workflow domain (every rule operator, rule-driven visibility,
 validation at field / section / tab level, reconciliation thresholds, value parsing, catalogue integrity, upload rules).
@@ -96,9 +110,14 @@ screen, degraded tabs, seed history), decisions applied from events, the full su
 the SSE hub, tailer and session (replay, resync, reauth, heartbeat, Viewer filtering) in `AuditFlow.Notification.Tests`.
 
 ## Telemetry
-OpenTelemetry in every service. `APPLICATIONINSIGHTS_CONNECTION_STRING` -> Application Insights; `OTEL_EXPORTER_OTLP_ENDPOINT` -> OTLP;
+OpenTelemetry traces, metrics and logs in every service. `APPLICATIONINSIGHTS_CONNECTION_STRING` -> Application Insights; `OTEL_EXPORTER_OTLP_ENDPOINT` -> OTLP;
 otherwise set `AuditFlow__Telemetry__Console=true` for console traces. The correlation id (`X-Correlation-Id`) flows through
-HTTP, outbox rows, Service Bus messages and handler logs.
+HTTP, outbox rows, Service Bus messages and handler logs, and the W3C `traceparent` is stored in the outbox row so a consumer's span joins the trace of the request that caused it.
+
+```powershell
+./infra/local/up.ps1 -Observability     # also starts the Aspire dashboard: http://localhost:18888
+```
+See [docs/architecture/observability.md](docs/architecture/observability.md) for the metrics list, readiness checks and a trace walkthrough.
 
 ## Dev-only settings
 The SQL password in compose and appsettings, the demo users and their password, and the database-stored signing key are local-dev

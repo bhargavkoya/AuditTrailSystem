@@ -3,6 +3,7 @@ using System.Text.Json;
 using AuditFlow.BuildingBlocks.Correlation;
 using AuditFlow.BuildingBlocks.Data;
 using AuditFlow.BuildingBlocks.Eventing;
+using AuditFlow.BuildingBlocks.Telemetry;
 using Azure.Messaging.ServiceBus;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
@@ -71,7 +72,8 @@ public sealed class SqlProcessedMessageStore : IProcessedMessageStore
 public interface IEventDispatcher
 {
     /// <summary>Returns true when handlers ran, false when the message was ignored or a duplicate.</summary>
-    Task<bool> DispatchAsync(string consumerName, Guid messageId, string eventType, string json, string? correlationId, CancellationToken cancellationToken);
+    Task<bool> DispatchAsync(string consumerName, Guid messageId, string eventType, string json, string? correlationId, CancellationToken cancellationToken,
+        string? traceParent = null, string? traceState = null);
 }
 
 /// <summary>
@@ -87,29 +89,53 @@ public sealed class EventDispatcher(
 {
     public static readonly ActivitySource Source = new("AuditFlow.Messaging");
 
-    public async Task<bool> DispatchAsync(string consumerName, Guid messageId, string eventType, string json, string? correlationId, CancellationToken cancellationToken)
+    public async Task<bool> DispatchAsync(string consumerName, Guid messageId, string eventType, string json, string? correlationId, CancellationToken cancellationToken,
+        string? traceParent = null, string? traceState = null)
     {
         var registrations = registry.For(eventType);
         if (registrations.Count == 0)
             return false;
 
         using var correlation = CorrelationContext.Begin(correlationId ?? string.Empty);
-        using var activity = Source.StartActivity($"consume {eventType}", ActivityKind.Consumer);
+        using var logScope = logger.BeginScope(new Dictionary<string, object>
+        {
+            ["CorrelationId"] = correlationId ?? string.Empty,
+            ["EventType"] = eventType,
+            ["MessageId"] = messageId
+        });
+
+        // Without a (valid) traceparent the consumer simply starts its own trace.
+        ActivityContext.TryParse(traceParent, traceState, isRemote: true, out var parent);
+        using var activity = Source.StartActivity($"consume {eventType}", ActivityKind.Consumer, parent);
+        activity?.SetTag("auditflow.event_type", eventType);
+        activity?.SetTag("auditflow.consumer", consumerName);
         activity?.SetTag("auditflow.correlation_id", correlationId);
         activity?.SetTag("messaging.message_id", messageId);
 
         await using var uow = await uowFactory.BeginAsync(cancellationToken);
         if (!await store.TryMarkAsync(consumerName, messageId, uow, cancellationToken))
         {
+            AuditFlowMetrics.RecordDuplicate(eventType);
             logger.LogInformation("Skipping duplicate {EventType} {MessageId} for {Consumer}", eventType, messageId, consumerName);
             return false;
         }
 
-        await using var scope = scopes.CreateAsyncScope();
-        foreach (var registration in registrations)
-            await registration.Invoke(scope.ServiceProvider, json, uow, cancellationToken);
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            foreach (var registration in registrations)
+                await registration.Invoke(scope.ServiceProvider, json, uow, cancellationToken);
 
-        await uow.CommitAsync(cancellationToken);
+            await uow.CommitAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            AuditFlowMetrics.RecordFailed(eventType);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
+        }
+
+        AuditFlowMetrics.RecordConsumed(eventType);
         return true;
     }
 }
@@ -122,12 +148,25 @@ public sealed class ServiceBusSubscriberHost(
     IEventDispatcher dispatcher,
     ILogger<ServiceBusSubscriberHost> logger) : BackgroundService
 {
+    /// <summary>
+    /// Handlers without a subscription would silently never run, so refuse to start instead. Checked here rather than in
+    /// <see cref="ExecuteAsync"/> because a throw there only reaches the host in some runtime versions.
+    /// </summary>
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        if (!registry.IsEmpty && string.IsNullOrWhiteSpace(options.Value.SubscriptionName))
+            throw new InvalidOperationException(
+                "Event handlers are registered but 'ServiceBus:SubscriptionName' is not configured (env var 'ServiceBus__SubscriptionName').");
+
+        return base.StartAsync(cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var o = options.Value;
-        if (registry.IsEmpty || string.IsNullOrWhiteSpace(o.SubscriptionName))
+        if (registry.IsEmpty)
         {
-            logger.LogInformation("No event handlers or subscription configured; subscriber idle");
+            logger.LogInformation("No event handlers registered; subscriber idle");
             return;
         }
 
@@ -186,6 +225,8 @@ public sealed class ServiceBusSubscriberHost(
         }
     }
 
+    public static bool IsLastDelivery(int deliveryCount, int maxDeliveryCount) => deliveryCount >= maxDeliveryCount;
+
     private async Task HandleAsync(ProcessMessageEventArgs args, string consumerName)
     {
         var message = args.Message;
@@ -193,12 +234,23 @@ public sealed class ServiceBusSubscriberHost(
         try
         {
             await dispatcher.DispatchAsync(consumerName, Guid.Parse(message.MessageId), eventType, message.Body.ToString(),
-                message.CorrelationId, args.CancellationToken);
+                message.CorrelationId, args.CancellationToken,
+                message.ApplicationProperties.GetValueOrDefault(TraceContextKeys.TraceParent)?.ToString(),
+                message.ApplicationProperties.GetValueOrDefault(TraceContextKeys.TraceState)?.ToString());
             await args.CompleteMessageAsync(message, args.CancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Handling {EventType} {MessageId} failed (delivery {Count})", eventType, message.MessageId, message.DeliveryCount);
+            if (IsLastDelivery(message.DeliveryCount, options.Value.MaxDeliveryCount))
+            {
+                AuditFlowMetrics.RecordDeadLettered(eventType);
+                logger.LogError(ex, "Handling {EventType} {MessageId} failed on its last delivery ({Count} of {Max}); the broker will dead-letter it. See docs/architecture/runbook.md",
+                    eventType, message.MessageId, message.DeliveryCount, options.Value.MaxDeliveryCount);
+            }
+            else
+            {
+                logger.LogError(ex, "Handling {EventType} {MessageId} failed (delivery {Count})", eventType, message.MessageId, message.DeliveryCount);
+            }
             await args.AbandonMessageAsync(message, cancellationToken: args.CancellationToken);
         }
     }

@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../services/gateway/AuditFlow.Gateway/appsettings.json" Link="gateway.appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\services\auth-service\AuditFlow.Auth.Api\AuditFlow.Auth.Api.csproj" />
+    <ProjectReference Include="..\..\services\engagement-service\AuditFlow.Engagement.Api\AuditFlow.Engagement.Api.csproj" />
+    <ProjectReference Include="..\..\services\workflow-service\AuditFlow.Workflow.Api\AuditFlow.Workflow.Api.csproj" />
+    <ProjectReference Include="..\..\services\attachment-service\AuditFlow.Attachment.Api\AuditFlow.Attachment.Api.csproj" />
+    <ProjectReference Include="..\..\services\review-service\AuditFlow.Review.Api\AuditFlow.Review.Api.csproj" />
+    <ProjectReference Include="..\..\services\notification-service\AuditFlow.Notification.Api\AuditFlow.Notification.Api.csproj" />
+  </ItemGroup>
+
+</Project>

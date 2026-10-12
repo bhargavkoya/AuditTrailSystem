@@ -15,6 +15,8 @@ x-service-env: &service-env
   Services__Engagement__BaseUrl: http://engagement-service:8080
   Services__Workflow__BaseUrl: http://workflow-service:8080
   APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
+  # Empty = no OTLP export. up.ps1 -Observability sets it to the dashboard container (see the otel-dashboard service).
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
 
 x-service-deps: &service-deps
   sqlserver: { condition: service_healthy }
@@ -53,12 +55,28 @@ services:
     volumes:
       - ./infra/local/servicebus/Config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro
 
+  # Local traces, metrics and logs with no Azure account: http://localhost:18888
+  #   docker compose --profile apps --profile observability up -d     (or ./infra/local/up.ps1 -Observability)
+  # Services reach it at http://otel-dashboard:18889 (OTLP/gRPC) once OTEL_EXPORTER_OTLP_ENDPOINT is set to that.
+  # Unsecured and in-memory: local development only; telemetry is lost when the container stops.
+  otel-dashboard:
+    profiles: [observability]
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:9.0
+    environment:
+      DASHBOARD__FRONTEND__AUTHMODE: Unsecured
+      DASHBOARD__OTLP__AUTHMODE: Unsecured
+      ASPIRE_ALLOW_UNSECURED_TRANSPORT: "true"
+    ports:
+      - "18888:18888"   # UI
+      - "4317:18889"    # OTLP/gRPC, for services running outside Docker (OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317)
+
   gateway:
     profiles: [apps]
     build: { context: ., dockerfile: infra/docker/service.Dockerfile, args: { PROJECT: services/gateway/AuditFlow.Gateway, DLL: AuditFlow.Gateway.dll } }
     environment:
       Urls: http://+:8080
       APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       ReverseProxy__Clusters__auth__Destinations__d1__Address: http://auth-service:8080/
       ReverseProxy__Clusters__engagement__Destinations__d1__Address: http://engagement-service:8080/
       ReverseProxy__Clusters__workflow__Destinations__d1__Address: http://workflow-service:8080/

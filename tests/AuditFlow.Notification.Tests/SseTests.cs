@@ -332,6 +332,34 @@ public class SseTests
         Assert.Equal([1L, 3L, 2L], seqs);
     }
 
+    // ---- Tailer readiness ---------------------------------------------------------------------------------------
+
+    private sealed class ManualClock(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset now = start;
+        public override DateTimeOffset GetUtcNow() => now;
+        public void Advance(TimeSpan by) => now += by;
+    }
+
+    [Fact]
+    public async Task Tailer_readiness_is_healthy_while_it_polls_and_unhealthy_once_it_goes_quiet()
+    {
+        var rig = new Rig();
+        var clock = new ManualClock(DateTimeOffset.UtcNow);
+        var tailer = new EventLogTailer(rig.Log, rig.Hub, rig.Options, NullLogger<EventLogTailer>.Instance, clock);
+        var check = new TailerHealthCheck(tailer, clock);
+        var context = new Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckContext();
+
+        clock.Advance(TimeSpan.FromSeconds(8));
+        Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy, (await check.CheckHealthAsync(context)).Status);
+
+        clock.Advance(TimeSpan.FromSeconds(3)); // 11 s since creation, no poll yet
+        Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy, (await check.CheckHealthAsync(context)).Status);
+
+        await tailer.PollAsync(default); // a poll resets the age
+        Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy, (await check.CheckHealthAsync(context)).Status);
+    }
+
     private static int Occurrences(string text, string needle)
     {
         var count = 0;

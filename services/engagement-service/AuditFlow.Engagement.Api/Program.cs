@@ -29,11 +29,11 @@ builder.Services.AddEventHandler<ConfigurationChangedPayload, ConfigurationChang
 builder.Services.AddScoped<IDataSeeder, DemoEngagementSeeder>();
 builder.Services.AddHttpClient<IWorkflowReadinessClient, WorkflowReadinessClient>(client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration["Services:Workflow:BaseUrl"] ?? "http://localhost:5003");
+    client.BaseAddress = builder.ServiceUrl("Workflow", "http://localhost:5003");
     client.Timeout = TimeSpan.FromSeconds(5);
 });
 builder.Services.AddHttpClient<IUserDirectoryClient, UserDirectoryClient>(client =>
-    client.BaseAddress = new Uri(builder.Configuration["Services:Auth:BaseUrl"] ?? "http://localhost:5001"));
+    client.BaseAddress = builder.ServiceUrl("Auth", "http://localhost:5001"));
 
 var app = builder.Build();
 app.UseAuditFlowDefaults();

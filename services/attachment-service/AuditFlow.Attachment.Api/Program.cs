@@ -28,7 +28,7 @@ builder.Services.AddScoped<AttachmentWriter>();
 builder.Services.AddScoped<AttachmentService>();
 builder.Services.AddHttpClient<IWorkflowClient, WorkflowClient>(client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration["Services:Workflow:BaseUrl"] ?? "http://localhost:5003");
+    client.BaseAddress = builder.ServiceUrl("Workflow", "http://localhost:5003");
     client.Timeout = TimeSpan.FromSeconds(5);
 });
 builder.Services.AddEventHandler<EngagementCreatedPayload, SeedAttachmentsHandler>(EventTypes.EngagementCreated);

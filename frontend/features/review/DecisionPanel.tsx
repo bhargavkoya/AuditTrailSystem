@@ -6,11 +6,15 @@ import { useDecide } from './api'
  * Approve / reject, rendered only when the backend says the reviewer may decide (canDecide). The reject comment is
  * mandatory on the server (400); an empty one is sent as is so the server's message is what the user reads.
  */
-export function DecisionPanel({ engagementId }: { engagementId: string }) {
+export function DecisionPanel({ engagementId, onAlreadyDecided }: { engagementId: string; onAlreadyDecided: () => void }) {
   const [comment, setComment] = useState('')
   const approve = useDecide(engagementId, 'approve')
   const reject = useDecide(engagementId, 'reject')
   const pending = approve.isPending || reject.isPending
+  // The panel disappears once the decision is applied, so the explanation is raised to the page.
+  const conflictHandler = (e: Error) => {
+    if (e instanceof ApiError && e.status === 409) onAlreadyDecided()
+  }
   const error = [approve.error, reject.error].find((e): e is ApiError => e instanceof ApiError) ?? null
 
   return (
@@ -28,15 +32,15 @@ export function DecisionPanel({ engagementId }: { engagementId: string }) {
 
       {error && (
         <p role="alert" className="mt-2 rounded bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error.status === 409 ? 'A decision has already been recorded for this review.' : error.status === 403 ? 'You cannot decide on this engagement right now.' : error.problem.detail ?? error.message}
+          {error.status === 409 ? 'A decision has already been recorded for this review; see the notice at the top of the page.' : error.status === 403 ? 'You cannot decide on this engagement right now.' : error.problem.detail ?? error.message}
         </p>
       )}
 
       <div className="mt-3 flex gap-3">
-        <button type="button" disabled={pending} onClick={() => approve.mutate(comment)} className="rounded bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-40">
+        <button type="button" disabled={pending} onClick={() => approve.mutate(comment, { onError: conflictHandler })} className="rounded bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-40">
           Approve
         </button>
-        <button type="button" disabled={pending} onClick={() => reject.mutate(comment)} className="rounded bg-red-700 px-4 py-2 text-sm font-medium text-white hover:bg-red-800 disabled:opacity-40">
+        <button type="button" disabled={pending} onClick={() => reject.mutate(comment, { onError: conflictHandler })} className="rounded bg-red-700 px-4 py-2 text-sm font-medium text-white hover:bg-red-800 disabled:opacity-40">
           Reject
         </button>
       </div>

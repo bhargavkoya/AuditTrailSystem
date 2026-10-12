@@ -1,11 +1,14 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ApiError } from '@shared/api/client'
+import { ConflictBanner } from '@shared/conflict/ConflictBanner'
+import { useConflictResolution, type ConflictItem } from '@shared/conflict/useConflictResolution'
+import type { LatestChange } from '@shared/conflict/useRemoteChanges'
 import type { EngagementDetail, UpdateEngagementRequest } from '@shared/api/types'
 import { useCreationOptions, useUsers } from '../dashboard/api'
 import { useUpdateEngagement } from './api'
 
 /** Offered only when the backend lists the editDetails action (Draft engagements). Sends only what changed. */
-export function EditDetailsDialog({ engagement, onClose }: { engagement: EngagementDetail; onClose: () => void }) {
+export function EditDetailsDialog({ engagement, onClose, latestChange }: { engagement: EngagementDetail; onClose: () => void; latestChange: LatestChange }) {
   const options = useCreationOptions(true)
   const reviewers = useUsers(true, 'Reviewer')
   const update = useUpdateEngagement(engagement.engagementId)
@@ -15,10 +18,46 @@ export function EditDetailsDialog({ engagement, onClose }: { engagement: Engagem
   const [region, setRegion] = useState(engagement.region)
   const [reviewerUserId, setReviewerUserId] = useState(engagement.reviewer.userId)
 
+  const conflict = useConflictResolution()
   const error = update.error instanceof ApiError ? update.error : null
-  const conflict = error?.status === 409
+  const hadConflict = error?.status === 409
   const fieldErrors = error?.problem.errors ?? {}
-  const general = error && !error.problem.errors && !conflict ? error.message : null
+  const general = error && !error.problem.errors && !hadConflict ? error.message : null
+
+  // A 409 refetches the engagement, so `engagement` changes underneath the form. Fields the user did not edit follow the new
+  // values; fields they edited and someone else also changed become rows to decide (take theirs / keep mine).
+  const previous = useRef(engagement)
+  useEffect(() => {
+    const was = previous.current
+    if (was.version === engagement.version) return
+    previous.current = engagement
+
+    const items: ConflictItem[] = []
+    const mineReviewer = reviewers.data?.find((u) => u.userId === reviewerUserId)?.displayName ?? reviewerUserId
+    const check = (key: string, label: string, base: string, mine: string, current: string, follow: (value: string) => void, show = (v: string) => v) => {
+      if (mine === base) follow(current)
+      else if (current !== base && current !== mine) items.push({ id: key, group: 'Engagement details', label, mine: show(mine), theirs: show(current) })
+    }
+    check('name', 'Name', was.name, name, engagement.name, setName)
+    check('periodType', 'Period type', was.periodType, periodType, engagement.periodType, setPeriodType)
+    check('region', 'Region', was.region, region, engagement.region, setRegion)
+    check('reviewer', 'Reviewer', was.reviewer.userId, reviewerUserId, engagement.reviewer.userId, setReviewerUserId,
+      (v) => (v === engagement.reviewer.userId ? engagement.reviewer.displayName : v === reviewerUserId ? mineReviewer : v))
+
+    if (items.length > 0 || hadConflict) {
+      const change = latestChange((c) => c.kind === 'engagement')
+      conflict.open({ subject: 'these details', by: change?.by ?? null, at: change?.at ?? null, items })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engagement])
+
+  function takeTheirs(item: ConflictItem) {
+    if (item.id === 'name') setName(engagement.name)
+    else if (item.id === 'periodType') setPeriodType(engagement.periodType)
+    else if (item.id === 'region') setRegion(engagement.region)
+    else if (item.id === 'reviewer') setReviewerUserId(engagement.reviewer.userId)
+    conflict.resolve(item.id)
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -28,6 +67,7 @@ export function EditDetailsDialog({ engagement, onClose }: { engagement: Engagem
     if (region !== engagement.region) request.region = region
     if (reviewerUserId !== engagement.reviewer.userId) request.reviewerUserId = reviewerUserId
     if (Object.keys(request).length === 0) return onClose()
+    conflict.dismiss()
 
     try {
       await update.mutateAsync({ request, version: engagement.version })
@@ -77,10 +117,14 @@ export function EditDetailsDialog({ engagement, onClose }: { engagement: Engagem
           <Err name="reviewerUserId" />
         </label>
 
-        {conflict && (
-          <p role="alert" className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            Someone else changed these details. Close this dialog to see the latest values, then edit again.
-          </p>
+        {conflict.state && (
+          <ConflictBanner
+            state={conflict.state}
+            onTakeTheirs={takeTheirs}
+            onKeepMine={(item) => conflict.resolve(item.id)}
+            onDismiss={conflict.dismiss}
+            emptyNote="The form shows the latest details; save again to apply your changes."
+          />
         )}
         {general && <p role="alert" className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{general}</p>}
 

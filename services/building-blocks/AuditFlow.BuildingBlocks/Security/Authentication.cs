@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using AuditFlow.BuildingBlocks.Errors;
+using AuditFlow.BuildingBlocks.Hosting;
 using AuditFlow.Contracts.Api;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
@@ -58,8 +59,8 @@ public static class AuthenticationExtensions
     /// </summary>
     public static WebApplicationBuilder AddAuditFlowAuthentication(this WebApplicationBuilder builder)
     {
-        var metadataAddress = builder.Configuration["Auth:MetadataAddress"]
-                              ?? "http://localhost:5001/.well-known/openid-configuration";
+        var metadataAddress = StartupConfig.RequireUrl(builder.Configuration, builder.Environment, "Auth:MetadataAddress",
+            "http://localhost:5001/.well-known/openid-configuration").ToString();
 
         builder.Services.AddSingleton<AuthenticationMarker>();
         builder.Services.AddHttpContextAccessor();

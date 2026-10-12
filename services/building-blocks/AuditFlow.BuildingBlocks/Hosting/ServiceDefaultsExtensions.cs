@@ -89,7 +89,18 @@ public static class ServiceDefaultsExtensions
 
         var serviceBusConfigured = !string.IsNullOrWhiteSpace(builder.Configuration[$"{ServiceBusOptions.Section}:ConnectionString"]);
         if (consumes && serviceBusConfigured)
+        {
             builder.Services.AddHostedService<ServiceBusSubscriberHost>();
+
+            // Readiness includes the broker, but only for services that consume (a subscription to peek).
+            var subscription = builder.Configuration[$"{ServiceBusOptions.Section}:SubscriptionName"];
+            var topic = builder.Configuration[$"{ServiceBusOptions.Section}:TopicName"] ?? new ServiceBusOptions().TopicName;
+            if (!string.IsNullOrWhiteSpace(subscription))
+                builder.Services.AddHealthChecks().Add(new HealthCheckRegistration(
+                    "servicebus",
+                    sp => ServiceBusHealthCheck.ForSubscription(sp.GetRequiredService<ServiceBusClient>(), topic, subscription),
+                    null, ["ready"]));
+        }
 
         return builder;
     }
@@ -120,6 +131,11 @@ public static class ServiceDefaultsExtensions
         var service = app.Services.GetRequiredService<ServiceInfo>().Name;
 
         app.UseMiddleware<CorrelationIdMiddleware>();
+        app.Use((context, next) =>
+        {
+            context.Response.Headers.XContentTypeOptions = "nosniff";
+            return next(context);
+        });
         app.UseExceptionHandler();
         app.UseSwagger();
         app.UseSwaggerUI();
@@ -129,6 +145,7 @@ public static class ServiceDefaultsExtensions
             app.UseAuthentication();
             app.UseAuthorization();
         }
+        app.UseMiddleware<RequestSpanTagsMiddleware>();
 
         app.MapGet("/", () => Results.Ok(new { service, docs = "/swagger", health = "/health" })).ExcludeFromDescription();
         app.MapHealthChecks("/health", new HealthCheckOptions

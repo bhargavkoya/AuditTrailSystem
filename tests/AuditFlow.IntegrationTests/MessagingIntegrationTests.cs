@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AuditFlow.BuildingBlocks.Data;
 using AuditFlow.BuildingBlocks.Eventing;
 using AuditFlow.BuildingBlocks.Messaging;
@@ -48,8 +49,9 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
         var db = await sql.CreateDatabaseAsync();
         var published = new List<string>();
         var bus = new Mock<IEventBus>();
-        bus.Setup(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()))
-            .Callback<EventEnvelope<System.Text.Json.JsonElement>, CancellationToken>((e, _) => published.Add(e.Payload.GetProperty("text").GetString()!))
+        bus.Setup(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()))
+            .Callback<IReadOnlyList<OutgoingEvent>, CancellationToken>((events, _) =>
+                published.AddRange(events.Select(e => e.Envelope.Payload.GetProperty("text").GetString()!)))
             .Returns(Task.CompletedTask);
         await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("first")), commit: true);
         await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("second")), commit: true);
@@ -58,8 +60,57 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
 
         Assert.Equal(2, count);
         Assert.Equal(["first", "second"], published);
+        bus.Verify(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()), Times.Once); // one broker round trip for the whole poll
         Assert.Equal(0, await db.ScalarAsync<int>("SELECT COUNT(*) FROM dbo.OutboxMessage WHERE PublishedAt IS NULL"));
         Assert.Equal(0, await NewDispatcher(db, bus.Object).DispatchBatchAsync(CancellationToken.None)); // nothing re-published
+    }
+
+    [Fact]
+    public async Task Trace_context_is_stored_with_the_row_and_the_publish_span_is_its_child()
+    {
+        var db = await sql.CreateDatabaseAsync();
+        var started = new List<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = _ => true,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStarted = started.Add
+        };
+        ActivitySource.AddActivityListener(listener);
+        using var requestSource = new ActivitySource("test.request");
+        string? requestTraceId;
+        using (var request = requestSource.StartActivity("request"))
+        {
+            requestTraceId = request!.TraceId.ToString();
+            await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("traced")), commit: true);
+        }
+        var requestSpanId = started.Single(a => a.OperationName == "request").SpanId;
+
+        var storedParent = await db.ScalarAsync<string>("SELECT TraceParent FROM dbo.OutboxMessage");
+        Assert.Contains(requestTraceId, storedParent);
+
+        string? traceParentOnMessage = null;
+        var bus = new Mock<IEventBus>();
+        bus.Setup(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()))
+            .Callback<IReadOnlyList<OutgoingEvent>, CancellationToken>((events, _) => traceParentOnMessage = events.Single().TraceParent)
+            .Returns(Task.CompletedTask);
+        await NewDispatcher(db, bus.Object).DispatchBatchAsync(CancellationToken.None);
+
+        var publish = Assert.Single(started, a => a.OperationName == "publish Ping");
+        Assert.Equal(requestSpanId, publish.ParentSpanId);
+        Assert.Equal(publish.Id, traceParentOnMessage); // the message carries the publish span, itself a child of the request
+    }
+
+    [Fact]
+    public async Task Event_enqueued_without_an_ambient_span_has_no_trace_context()
+    {
+        var db = await sql.CreateDatabaseAsync();
+        Activity.Current = null;
+
+        await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("untraced")), commit: true);
+
+        Assert.Equal(0, await db.ScalarAsync<int>("SELECT COUNT(*) FROM dbo.OutboxMessage WHERE TraceParent IS NOT NULL"));
+        Assert.Equal(1, await NewDispatcher(db, Mock.Of<IEventBus>()).DispatchBatchAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -67,7 +118,7 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
     {
         var db = await sql.CreateDatabaseAsync();
         var bus = new Mock<IEventBus>();
-        bus.Setup(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()))
+        bus.Setup(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("bus down"));
         await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("x")), commit: true);
 
@@ -87,11 +138,11 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
         var delivered = new List<string>();
         var busDown = true;
         var bus = new Mock<IEventBus>();
-        bus.Setup(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()))
-            .Returns<EventEnvelope<System.Text.Json.JsonElement>, CancellationToken>((e, _) =>
+        bus.Setup(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()))
+            .Returns<IReadOnlyList<OutgoingEvent>, CancellationToken>((events, _) =>
             {
                 if (busDown) throw new InvalidOperationException("bus down");
-                delivered.Add(e.Payload.GetProperty("text").GetString()!);
+                delivered.AddRange(events.Select(e => e.Envelope.Payload.GetProperty("text").GetString()!));
                 return Task.CompletedTask;
             });
         await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("first")), commit: true);
@@ -100,7 +151,7 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
 
         Assert.Equal(0, await dispatcher.DispatchBatchAsync(default));                 // attempt 1 fails
         Assert.Equal(0, await dispatcher.DispatchBatchAsync(default));                 // still backing off: bus not even called
-        bus.Verify(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()), Times.Once);
+        bus.Verify(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()), Times.Once);
 
         clock.Advance(TimeSpan.FromSeconds(2));
         Assert.Equal(0, await dispatcher.DispatchBatchAsync(default));                 // attempt 2 fails, backoff doubles
@@ -118,7 +169,7 @@ public class MessagingIntegrationTests(SqlServerFixture sql)
         var db = await sql.CreateDatabaseAsync();
         var clock = new ManualClock(DateTimeOffset.UtcNow);
         var bus = new Mock<IEventBus>();
-        bus.Setup(b => b.PublishAsync(It.IsAny<EventEnvelope<System.Text.Json.JsonElement>>(), It.IsAny<CancellationToken>()))
+        bus.Setup(b => b.PublishBatchAsync(It.IsAny<IReadOnlyList<OutgoingEvent>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("bus down"));
         await EnqueueAsync(db, EventEnvelope<Ping>.Create("Ping", "ENG-1", new Ping("x")), commit: true);
         var dispatcher = NewDispatcher(db, bus.Object, clock);

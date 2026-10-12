@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using AuditFlow.BuildingBlocks.Telemetry;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -54,6 +56,10 @@ public sealed class AuditFlowExceptionHandler(ILogger<AuditFlowExceptionHandler>
             _ => null
         };
 
+        if (exception is ConcurrencyException conflict) AuditFlowMetrics.RecordConflict(conflict.Resource);
+        else if (exception is ConflictException) AuditFlowMetrics.RecordConflict("decision");
+        else if (exception is SubmissionBlockedException) AuditFlowMetrics.BlockedSubmits.Add(1);
+
         if (problem is null)
         {
             logger.LogError(exception, "Unhandled exception");
@@ -61,6 +67,7 @@ public sealed class AuditFlowExceptionHandler(ILogger<AuditFlowExceptionHandler>
         }
 
         problem.Extensions["correlationId"] = context.Request.Headers["X-Correlation-Id"].ToString();
+        if (Activity.Current is { } span) problem.Extensions["traceId"] = span.TraceId.ToString();
         context.Response.StatusCode = problem.Status!.Value;
         await context.Response.WriteAsJsonAsync(problem, problem.GetType(), options: null, contentType: "application/problem+json", cancellationToken);
         return true;

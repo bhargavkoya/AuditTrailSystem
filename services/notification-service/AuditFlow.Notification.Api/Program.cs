@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using AuditFlow.BuildingBlocks.Hosting;
 using AuditFlow.BuildingBlocks.Messaging;
 using AuditFlow.BuildingBlocks.Security;
@@ -25,9 +26,14 @@ builder.Services.Configure<SseOptions>(builder.Configuration.GetSection(SseOptio
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<EventHub>();
 builder.Services.AddSingleton<SseSession>();
-builder.Services.AddHostedService<EventLogTailer>();
+builder.Services.AddSingleton<EventLogTailer>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<EventLogTailer>());
+builder.Services.AddHealthChecks().Add(new HealthCheckRegistration(
+    "event-log-tailer", sp => new TailerHealthCheck(sp.GetRequiredService<EventLogTailer>(), sp.GetRequiredService<TimeProvider>()),
+    null, ["ready"]));
 
 var app = builder.Build();
+app.Services.GetRequiredService<EventHub>().RegisterMetrics();
 app.UseAuditFlowDefaults();
 app.MapStreamEndpoints();
 app.Run();
