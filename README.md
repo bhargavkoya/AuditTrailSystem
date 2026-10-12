@@ -1,5 +1,7 @@
 # AuditFlow (POC)
 
+[![CI](https://github.com/bhargavkoya/AuditTrailSystem/actions/workflows/ci.yml/badge.svg)](https://github.com/bhargavkoya/AuditTrailSystem/actions/workflows/ci.yml)
+
 Backend-controlled audit engagement management platform: a demoable microservices skeleton.
 Spec: [docs/PRD.md](docs/PRD.md) | Plans: [implementation](docs/architecture/implementation-plan.md), [Phase 1](docs/architecture/phase-1-plan.md), [Phase 2](docs/architecture/phase-2-plan.md), [Phase 3](docs/architecture/phase-3-plan.md) |
 Decisions: [docs/decisions](docs/decisions) | API: [docs/api](docs/api/README.md) | Events: [contracts/events](contracts/events/README.md) |

@@ -1,0 +1,162 @@
+name: CI
+
+# Every pull request and every push to main. Four jobs run in parallel except the compose smoke test, which waits for the
+# fast unit job so a broken build does not spend ten minutes starting containers.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push to the same branch or PR cancels the run it supersedes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+jobs:
+  build-test:
+    name: Build and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Build
+        run: dotnet build AuditFlow.sln -c Release
+
+      # Everything that does not need Docker: state machine, permission rules, validation, concurrency, idempotent
+      # consumers, telemetry, route inventory (every route requires authorization).
+      - name: Unit tests
+        run: dotnet test AuditFlow.sln -c Release --no-build --filter "Category!=Integration" --logger "trx;LogFileName=unit.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: TestResults/*.trx
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend type-check and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      # "build" is tsc --noEmit followed by vite build.
+      - name: Type-check and build
+        run: npm run build --workspace apps/web
+
+  integration:
+    name: Integration tests (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      # Testcontainers starts a SQL Server per test class on the runner's Docker daemon.
+      - name: Integration tests
+        run: dotnet test AuditFlow.sln -c Release --filter "Category=Integration" --logger "trx;LogFileName=integration.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: TestResults/*.trx
+          if-no-files-found: ignore
+
+  compose-smoke:
+    name: Compose smoke (permission audit and load smoke)
+    needs: build-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Start the stack (SQL Server, Service Bus emulator, gateway, 6 services)
+        run: docker compose --profile apps up -d --build
+
+      # The services wait for SQL Server and the emulator themselves; /health/{service} on the gateway reports each one.
+      - name: Wait for every service to be healthy
+        run: |
+          for attempt in $(seq 1 60); do
+            healthy=0
+            for service in auth engagement workflow attachment review notification; do
+              if curl -fsS -m 5 "http://localhost:5000/health/$service" | grep -q '"status":"Healthy"'; then healthy=$((healthy + 1)); fi
+            done
+            echo "attempt $attempt: $healthy/6 healthy"
+            if [ "$healthy" -eq 6 ]; then exit 0; fi
+            sleep 5
+          done
+          echo "The stack did not become healthy in time" >&2
+          exit 1
+
+      # Black-box: every role x status x operation against tools/permission-audit/matrix.json. A mismatch fails the build.
+      - name: Permission audit
+        run: node tools/permission-audit/audit.mjs --quiet
+
+      # 20 virtual users for about 30 s. Targets are loosened (x3) because shared CI runners are slower than a laptop;
+      # this catches regressions such as errors, dropped streams or a stuck outbox, not capacity.
+      - name: Load smoke
+        run: node tools/load-test/load.mjs --smoke --targets-scale 3
+
+      - name: Collect container logs
+        if: failure()
+        run: docker compose --profile apps logs --no-color > compose.log 2>&1
+
+      - name: Upload container logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-logs
+          path: compose.log
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose --profile apps down -v
