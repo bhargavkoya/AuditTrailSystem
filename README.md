@@ -27,14 +27,20 @@ Conventions: [CLAUDE.md](CLAUDE.md)
 .NET 8 SDK (`global.json` pins 8.0.x), Docker Desktop, Node 20+.
 
 ## Run
-```powershell
-# everything in Docker: SQL Server, Service Bus emulator, gateway, 6 services (first run builds images)
-./infra/local/up.ps1
+```cmd
+:: everything in Docker: SQL Server, Service Bus emulator, gateway, 6 services (first run builds images)
+docker compose --profile apps up -d --build
 
-# frontend (npm workspace rooted at frontend/)
-cd frontend; npm install; cd apps/web; npm run dev     # http://localhost:5173
+:: frontend (npm workspace rooted at frontend/), in a second terminal
+cd frontend
+npm install
+cd apps\web
+npm run dev
 ```
-Infrastructure only: `docker compose up -d`. Stop: `./infra/local/down.ps1` (`-Volumes` wipes all data and re-seeds on the next start).
+The app is at http://localhost:5173. Full cmd steps, ports and troubleshooting (including Docker `read-only file system` build errors) are in
+[docs/architecture/local-setup.md](docs/architecture/local-setup.md).
+Infrastructure only: `docker compose up -d`. Stop: `docker compose --profile apps --profile observability down` (add `-v` to wipe all data and re-seed on the next start).
+The `infra/local/*.ps1` scripts do the same and are optional.
 
 ### Try it
 Sign in at http://localhost:5173 with a demo user (password `Passw0rd!`):
