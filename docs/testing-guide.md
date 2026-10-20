@@ -1,6 +1,6 @@
 # Manual testing guide
 
-Demo video: https://youtu.be/zuUTh33ip_g
+[![AuditFlow demo video](https://img.youtube.com/vi/zuUTh33ip_g/mqdefault.jpg)](https://youtu.be/zuUTh33ip_g)
 
 Scenarios to verify AuditFlow by hand on a local machine. Each one lists the user, the steps and the expected result, so you can tick them off.
 Automated checks are in the last section. Rules referenced here come from the PRD, `docs/api/README.md` and the rule set at
