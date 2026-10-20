@@ -4,7 +4,11 @@
 
 Backend-controlled audit engagement management platform: a demoable microservices skeleton.
 
-**Demo video:** [Watch the walkthrough on YouTube](https://youtu.be/zuUTh33ip_g)
+## Demo
+
+[![AuditFlow demo video](https://img.youtube.com/vi/zuUTh33ip_g/maxresdefault.jpg)](https://youtu.be/zuUTh33ip_g)
+
+Click the thumbnail to watch the walkthrough on YouTube.
 Spec: [docs/PRD.md](docs/PRD.md) | Plans: [implementation](docs/architecture/implementation-plan.md), [Phase 1](docs/architecture/phase-1-plan.md), [Phase 2](docs/architecture/phase-2-plan.md), [Phase 3](docs/architecture/phase-3-plan.md), [Phase 4](docs/architecture/phase-4-plan.md) |
 Testing: [manual testing guide](docs/testing-guide.md) |
 Operations: [runbook](docs/architecture/runbook.md), [observability](docs/architecture/observability.md), [load test](docs/architecture/load-test-results.md) |
