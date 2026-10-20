@@ -4,6 +4,7 @@
 
 Backend-controlled audit engagement management platform: a demoable microservices skeleton.
 Spec: [docs/PRD.md](docs/PRD.md) | Plans: [implementation](docs/architecture/implementation-plan.md), [Phase 1](docs/architecture/phase-1-plan.md), [Phase 2](docs/architecture/phase-2-plan.md), [Phase 3](docs/architecture/phase-3-plan.md), [Phase 4](docs/architecture/phase-4-plan.md) |
+Testing: [manual testing guide](docs/testing-guide.md) |
 Operations: [runbook](docs/architecture/runbook.md), [observability](docs/architecture/observability.md), [load test](docs/architecture/load-test-results.md) |
 Decisions: [docs/decisions](docs/decisions) | API: [docs/api](docs/api/README.md) | Events: [contracts/events](contracts/events/README.md) |
 Conventions: [CLAUDE.md](CLAUDE.md)
@@ -43,6 +44,8 @@ Infrastructure only: `docker compose up -d`. Stop: `docker compose --profile app
 The `infra/local/*.ps1` scripts do the same and are optional.
 
 ### Try it
+Step-by-step manual test scenarios (UI, API, SSE, roles, concurrency) are in [docs/testing-guide.md](docs/testing-guide.md).
+
 Sign in at http://localhost:5173 with a demo user (password `Passw0rd!`):
 
 | User | Role | What to notice |
